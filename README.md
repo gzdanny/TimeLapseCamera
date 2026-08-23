@@ -1,281 +1,535 @@
-# TimeLapseCamera · 延时相机
+# 延时相机 (TimeLapseCamera)
 
-长期定时拍摄 Android App，专为旧手机设计。连续 1 年每小时拍照一张，记录植物生长或城市发展。
+旧手机变身延时拍摄设备 —— 长期定期拍照，记录植物生长或城市发展。
 
 ## 核心特性
 
-- **长时间定期拍摄**：支持 15 秒 ~ 24 小时拍摄间隔，可连续运行数月
-- **低功耗设计**：每次拍摄仅数秒，间隔期深度休眠，不持锁
-- **三层保活**：前台服务 + START_STICKY + AlarmManager 备份闹钟
-- **水印系统**：时间戳 + 自定义文字 + 电量/存储/温度（可开关）
-- **失败回退**：镜头切换 + 黑图占位 + 写入不崩溃
-- **三种存储位置**：App 私有目录 / 系统相册 (DCIM) / SD 卡
-- **远程配置**：URL 下发拍摄间隔，三级回退（远程值 → 上次值 → 本地值）
-- **输入校验**：间隔范围 15-86400 + URL 格式 + 实际抓取验证
-- **底部导航 4 Tab**：状态 / 预览 / 相册 / 设置
+- **底部导航 4 Tab**：状态 / 预览 / 相册 / 设置，功能分区清晰
+- **三层保活**：前台服务通知（主）+ START_STICKY（恢复）+ AlarmManager 备份闹钟
+- **倒计时通知**：`setChronometerCountDown` 让系统自动渲染倒计时，零额外功耗
+- **按需启停摄像头**：每次拍摄重新初始化摄像头，拍完立即释放，间隔期零硬件功耗
+- **丰富水印**：时间戳 + 自定义文字 + 电量/存储/温度（可开关）
+- **失败回退**：镜头自动切换 + 黑图占位 + 写入不崩溃 + 进程被杀恢复
+- **远程配置下发**（预留）：通过 URL 动态调整拍摄间隔
+- **模块插拔设计**：相机、存储、配置均可独立替换，适合教学
 
-## 技术栈
+## UI 架构
 
-| 领域 | 技术 |
-|------|------|
-| 语言 | Kotlin |
-| 异步 | Coroutines + kotlinx-coroutines-play-services |
-| 相机 | CameraX（Preview + ImageCapture） |
-| 导航 | Bottom Navigation + Fragment |
-| 图片加载 | Coil |
-| 持久化 | SharedPreferences |
-| 后台调度 | 前台服务 + AlarmManager（备份） |
-| 存储 | File API + MediaStore（DCIM） |
-| 权限 | ActivityResultContracts |
-| minSdk | 26 (Android 8.0) |
-| targetSdk | 34 (Android 14) |
+底部导航 4 个 Tab，默认进入「状态」页：
+
+```
+┌─────────────────────────────┐
+│                             │
+│        Fragment 内容         │
+│  （状态/预览/相册/设置）      │
+│                             │
+├─────────────────────────────┤
+│  📊 状态 | 📷 预览 | 🖼 相册 | ⚙ 设置  │
+└─────────────────────────────┘
+```
+
+| Tab | 功能 | 典型使用场景 |
+|-----|------|-------------|
+| **状态** | 倒计时、最近照片、电量/存储/温度、开始/停止 | 用户打开 App 第一眼，确认运行正常 |
+| **预览** | 实时画面 + 「立即拍一张」试拍 | 安装时构图对齐，验证水印效果 |
+| **相册** | 网格浏览历史照片 | 回看记录，检查故障时段 |
+| **设置** | 拍摄参数、水印开关、权限状态、远程配置 | 调整参数，检查权限 |
 
 ## 架构总览
 
 ```
 ┌──────────────────────────────────────────────────┐
-│                    UI 层                          │
-│  ┌──────────┐ ┌──────┐ ┌──────┐ ┌──────┐        │
-│  │StatusFrag│ │Preview│ │Gallery│ │Settings│   │
-│  └────┬─────┘ └──┬───┘ └──┬───┘ └──┬───┘       │
-│       │           │        │        │            │
-│       └─────┬─────┴────────┴────────┘           │
-│             │ Intent / 读配置                      │
-├─────────────┼────────────────────────────────────┤
-│             ▼           业务层                     │
-│  ┌──────────────────────────────────────────┐    │
-│  │           CaptureService                  │    │
-│  │  ┌──────────────────────────────────┐    │    │
-│  │  │ captureLoop()                     │    │    │
-│  │  │  1. 读 config (本地+远程)          │    │    │
-│  │  │  2. 取下一拍摄间隔                 │    │    │
-│  │  │  3. 唤醒等待                        │    │    │
-│  │  │  4. 拍照 (ICameraController)       │    │    │
-│  │  │  5. 加水印 (WatermarkProcessor)     │    │    │
-│  │  │  6. 存盘 (IPhotoStorage)            │    │    │
-│  │  │  7. 更新通知 + 设备份闹钟            │    │    │
-│  │  │  8. 更新 config (captureCount 等)   │    │    │
-│  │  └──────────────────────────────────┘    │    │
-│  └──────────────────────────────────────────┘    │
-├──────────────────────────────────────────────────┤
-│                 模块层                             │
-│  ┌────────┐ ┌──────────┐ ┌─────────┐ ┌────────┐ │
-│  │ Config │ │  Camera  │ │Watermark│ │Storage │ │
-│  │        │ │  (接口)   │ │         │ │ (接口) │ │
-│  │        │ │     ↓    │ │         │ │   ↓    │ │
-│  │        │ │CameraX   │ │         │ │Factory │ │
-│  │        │ │Controller│ │         │ │  ↓↓↓   │ │
-│  │        │ │          │ │         │ │Local/  │ │
-│  │        │ │          │ │         │ │DCIM/SD │ │
-│  └────────┘ └──────────┘ └─────────┘ └────────┘ │
+│                  MainActivity                      │
+│         （底部导航 + 4 个 Fragment）                 │
+│  StatusFragment  PreviewFragment  GalleryFragment  │
+│  SettingsFragment                                  │
+└──────────────────┬─────────────────────────────────┘
+                   │ startForegroundService(ACTION_START)
+                   ▼
+┌──────────────────────────────────────────────────┐
+│              CaptureService (持久化前台服务)         │
+│          通知栏显示倒计时 → 进程不被系统杀死          │
+│  ┌────────────────────────────────────────────┐  │
+│  │            captureLoop (协程循环)             │  │
+│  │                                            │  │
+│  │  取配置 → 远程间隔 → 拍照 → 水印 → 存盘       │  │
+│  │     │                                    │  │
+│  │     ├── 更新倒计时通知（系统自动渲染）         │  │
+│  │     ├── scheduleNext() 备份闹钟             │  │
+│  │     └── delay(间隔) → 协程挂起，不持WakeLock  │  │
+│  │                                            │  │
+│  │  ↺ 循环直到 isRunning=false 或被取消          │  │
+│  └────────────────────────────────────────────┘  │
+│                                                  │
+│  拍摄时: CameraXController → WatermarkProcessor  │
+│          → IPhotoStorage (工厂按需创建)           │
 └──────────────────────────────────────────────────┘
+
+三层保活:
+  ① 前台服务通知（主）── 进程不被系统主动杀死
+  ② START_STICKY     ── 被杀后系统尽量恢复
+  ③ AlarmManager 备份 ── 每次拍摄后设闹钟，服务被杀则闹钟重启
+
+  AlarmManager ──闹钟到期──▶ CaptureReceiver ──▶ startForegroundService
+  开机自启    ──BOOT_COMPLETED──▶ BootReceiver ──▶ startForegroundService
 ```
 
 ## 目录结构
 
 ```
 app/src/main/java/com/timelapse/camera/
-├── MainActivity.kt              # 底部导航 + Fragment 切换
-├── camera/                       # ── 相机模块 ──
-│   ├── ICameraController.kt      #   接口：capture() / release()
-│   └── CameraXController.kt     #   CameraX 实现，备用镜头 fallback
+├── MainActivity.kt              # 主界面：底部导航 + Fragment 切换
+│
+├── ui/                          # ── UI 层（Fragment）──
+│   ├── status/StatusFragment.kt    #   状态页：倒计时 + 最近照片 + 统计
+│   ├── preview/PreviewFragment.kt  #   预览页：实时画面 + 试拍
+│   ├── gallery/GalleryFragment.kt  #   相册页：网格照片列表
+│   └── settings/SettingsFragment.kt #  设置页：参数 + 权限状态
+│
 ├── config/                       # ── 配置模块 ──
-│   ├── CaptureConfig.kt         #   持久化 + StorageLocation 枚举
-│   └── RemoteConfigFetcher.kt    #   URL 下发间隔，三级回退
-├── model/
-│   └── CaptureResult.kt          #   sealed class: Success / Failure
-├── scheduler/                    # ── 调度模块（备份机制）──
-│   ├── BootReceiver.kt           #   开机自启
-│   ├── CaptureReceiver.kt       #   闹钟触发 → 重启 Service
-│   └── CaptureScheduler.kt      #   AlarmManager 封装
-├── service/
-│   └── CaptureService.kt         # 前台服务：编排全流程
+│   ├── CaptureConfig.kt          #   拍摄配置 (data class + SharedPreferences 持久化)
+│   └── RemoteConfigFetcher.kt    #   远程配置拉取 (URL → 返回秒数 15~3600)
+│
+├── camera/                       # ── 相机模块 ──
+│   ├── ICameraController.kt      #   接口：capture() → CaptureResult
+│   └── CameraXController.kt      #   CameraX 实现 (每次拍完即释放摄像头)
+│
+├── watermark/                    # ── 水印模块 ──
+│   ├── WatermarkOptions.kt       #   水印配置 data class（显示哪些信息）
+│   └── WatermarkProcessor.kt     #   Canvas 绘制：左上状态 + 右下时间戳
+│
 ├── storage/                      # ── 存储模块 ──
-│   ├── IPhotoStorage.kt          #   接口：save / getPhotoCount / ...
-│   ├── LocalPhotoStorage.kt     #   App 私有目录 / SD 卡（File API）
-│   ├── DcimPhotoStorage.kt      #   DCIM（API 29+ MediaStore / 26-28 File API）
-│   └── PhotoStorageFactory.kt   #   工厂：根据配置选择实现
-├── ui/
-│   ├── status/StatusFragment.kt  # Tab1: 倒计时 + 缩略图 + 状态
-│   ├── preview/PreviewFragment.kt # Tab2: 实时预览 + 立即拍一张
-│   ├── gallery/GalleryFragment.kt # Tab3: 网格照片列表
-│   └── settings/SettingsFragment.kt # Tab4: 拍摄/水印/权限/远程/关于
-├── util/
-│   ├── BatteryMonitor.kt         # 电量/存储/温度读取（无需权限）
-│   └── PermissionChecker.kt      # 4 项权限检测 + 跳转设置
-└── watermark/
-    ├── WatermarkOptions.kt       # 水印配置（电量/存储/温度开关）
-    └── WatermarkProcessor.kt     # Canvas 绘制 + createErrorBitmap()
+│   ├── IPhotoStorage.kt           #   接口：save/getLatest/getAll/...
+│   ├── LocalPhotoStorage.kt      #   App 私有目录实现 (按年月归档)
+│   ├── DcimPhotoStorage.kt       #   DCIM 公共目录实现 (MediaStore 写入)
+│   └── PhotoStorageFactory.kt    #   工厂：根据配置选择存储实现
+│
+├── util/                         # ── 工具类 ──
+│   ├── BatteryMonitor.kt         #   电量/存储/温度读取
+│   └── PermissionChecker.kt      #   权限检查 + 跳转系统设置
+│
+├── scheduler/                    # ── 调度模块（备份）──
+│   ├── CaptureScheduler.kt       #   AlarmManager 备份闹钟（服务被杀后重启）
+│   ├── CaptureReceiver.kt        #   闹钟接收器 → 重启前台服务
+│   └── BootReceiver.kt           #   开机自启 → 启动前台服务
+│
+├── service/                      # ── 服务模块 ──
+│   └── CaptureService.kt        #   持久化前台服务：协程循环 + 倒计时通知
+│
+└── model/                        # ── 数据模型 ──
+    └── CaptureResult.kt         #   拍摄结果 (sealed class: Success / Failure)
 ```
 
 ## 关键设计决策
 
-### Camera2 vs CameraX
+### 1. 为什么用持久化前台服务而不是纯 AlarmManager？
 
-| 对比项 | Camera2 | CameraX |
-|--------|---------|---------|
-| 代码量 | 多（手写 HandlerThread、会话管理） | 少 40%（Preview 用例一行） |
-| 预览实现 | 手写 CaptureSession | PreviewView + Preview 用例 |
-| 兼容性 | API 21+ | API 21+（底层封装 Camera2） |
-| 教学价值 | 贴近底层 | 现代推荐写法 |
+| 对比项 | 纯 AlarmManager | 持久化前台服务 + 闹钟备份 |
+|--------|----------------|------------------------|
+| 进程保活 | 无进程常驻，闹钟到期才创建 | 前台通知保持进程存活 |
+| 国产 ROM 省电 | 易被杀闹钟 | 通知保活 + 闹钟双保险 |
+| 用户可见性 | 无通知，用户不知道是否在运行 | 倒计时通知实时可见 |
+| 功耗 | 间隔期零功耗 | 间隔期进程空闲（微安级），可忽略 |
+| 可靠性 | 依赖闹钟不被系统拦截 | 三层保活：通知 + STICKY + 闹钟 |
 
-**选择 CameraX**：Google 官方推荐，代码简洁，预览和拍照用同一套体系，教学更统一。
+长期拍摄（1年）可靠性 >> 微量功耗节省，前台服务是更优选择。
 
-### 纯 AlarmManager vs 前台服务
+### 2. 为什么从 Camera2 迁移到 CameraX？
 
-| 对比项 | 纯 AlarmManager | 前台服务 + AlarmManager 备份 |
-|--------|----------------|-------------------------------|
-| 国产 ROM 保活 | 不可靠（进程被杀 → 闹钟被取消） | 可靠（前台服务不被杀 + 闹钟备份） |
-| 用户可见性 | 无 | 通知栏倒计时 |
-| 功耗 | 低 | 低（间隔期不持锁） |
+| 维度 | 手写 Camera2 | CameraX |
+|------|------------|---------|
+| 代码量 | ~280 行 | ~180 行 |
+| 设备兼容性 | 需手动处理各厂商差异 | 官方封装，自动兼容 |
+| 预览实现 | 需手写 Surface + CaptureSession | PreviewView 一行搞定 |
+| 教学清晰度 | 能看到底层原理，但代码噪音多 | 核心逻辑突出，更容易理解 |
 
-**选择前台服务 + AlarmManager 备份**：三层保活确保长期运行可靠。
+CameraX 底层就是 Camera2，功能完全一致，但代码量减少 40%+，
+教学上学生能把注意力放在"延时相机的架构"而不是"Camera2 的繁琐配置"。
 
-### SharedPreferences vs DataStore
+### 3. 水印为什么加电量/存储/温度？
 
-**选择 SharedPreferences**：API 更简单，学生容易理解；DataStore 的异步优势在此场景不明显。（可迁移到 DataStore 作为学生练习）
+延时照片几年后回看时，你想知道的不只是"几点拍的"，还有"当时什么状况"：
+
+- **电量**：照片序列断了，回看水印能知道是没电了还是摄像头坏了
+- **存储**：最后几张是黑图，回看水印能知道是磁盘满了还是镜头挂了
+- **温度**：夏天放窗边过热导致拍摄失败，水印里有温度一眼就能判断
+
+这些信息写进水印的独特价值是：**照片本身就携带了完整的上下文**，不依赖 App 或日志文件。
+
+### 4. 为什么每次拍摄重新初始化摄像头？
+
+传统相机 App 保持摄像头常开以实现预览和快速拍摄。但延时拍摄间隔可能长达 1 小时，
+持续保持摄像头开启会浪费大量功耗。每次拍摄重新初始化的模式：
+
+```
+休眠(间隔期) → 唤醒 → 开摄像头(0.5s) → 拍照(0.1s) → 关摄像头 → 存盘 → 休眠
+```
+
+拍摄过程仅占整个间隔的极小比例，功耗接近最优。
+
+### 5. 最低 API 26 (Android 8.0) 的理由
+
+- CameraX 稳定支持 API 21+，但 API 26+ 行为更一致
+- `getExternalFilesDir()` 无需存储权限，简化权限流程
+- 前台服务 + 通知通道 API 成熟
+- 覆盖 2017 年后绝大多数旧手机
 
 ## 失败回退机制
 
-四个关键环节的回退策略：
+长期运行的 App，失败处理比成功路径更重要。以下是各个环节的回退策略：
 
-| 环节 | 失败场景 | 回退策略 |
+### 总览
+
+```
+远程配置失败 → 三级回退：远程值 → 上次远程值 → 本地配置值
+      ↓
+拍摄失败  → 自动切换备用镜头重试一次 → 还失败 → 生成黑图占位
+      ↓
+写入失败  → 打 Log + 释放资源 → 等下一轮重试（绝不崩溃）
+      ↓
+进程被杀  → START_STICKY 恢复 + AlarmManager 备份闹钟重启
+```
+
+### 1. 远程配置失败（三级回退）
+
+| 层级 | 触发条件 | 行为 |
+|------|---------|------|
+| 第一级 | URL 返回有效整数（15-3600） | 使用该值，并更新 lastRemoteInterval |
+| 第二级 | URL 失败/超时/返回非数字/返回值超出 15-3600，但有上次有效值 | 回退到 lastRemoteInterval |
+| 第三级 | URL 失败且无上次记录 | 回退到本地配置的 intervalSeconds |
+
+### 2. 拍摄失败（镜头切换 + 黑图占位）
+
+**镜头切换救场**：主摄像头失败时，自动切换到另一个镜头重试一次。
+- 成功了就用备用镜头的照片
+- 失败了继续走黑图占位逻辑
+- 下一轮仍然从主镜头开始（每次重新走完整流程，行为可预测）
+
+**黑图占位**：两个镜头都失败时，生成一张 1280×720 的纯黑图，右下角绘制时间戳 + "拍摄失败"文字。
+
+为什么要做黑图？
+- 用户翻照片序列时，能区分"App 正常唤醒了但摄像头坏了" vs "App 根本没跑"
+- 纯黑图 + 明确文字，比单纯打 Log 更直观
+- 尺寸较小（720p），不浪费磁盘空间
+
+### 3. 写入失败（释放资源 + 等下一轮）
+
+磁盘满、IO 错误、SD 卡拔出…… 写入可能失败。处理原则：
+- **绝不崩溃**：用 `runCatching` 包裹，失败只打 Log
+- **释放资源**：写入失败时手动 recycle Bitmap，避免内存泄漏
+- **继续循环**：下一轮到了再试一次（也许用户清理了空间）
+
+### 4. 进程被杀（三层保活）
+
+详见前文"三层保活机制"章节。
+
+## 权限与保活设置
+
+设置页的「权限与保活」分组展示 4 项可检测的权限状态：
+
+| 权限 | 检测方式 | 点击跳转 |
 |------|---------|---------|
-| 唤醒 | 服务被杀 | AlarmManager 备份闹钟 → CaptureReceiver → 重启 Service |
-| 拍照 | 主镜头失败 | 切换备用镜头重试 → 仍失败 → 生成黑图占位（水印标注"拍摄失败"） |
-| 远程配置 | URL 失败/超时/值超范围 | 远程值 → 上次远程值 → 本地配置值（三级回退） |
-| 写入 | 磁盘满/IO 错误 | runCatching 兜底，仅 Log 不崩溃，下一轮重试 |
+| 相机权限 | `checkSelfPermission(CAMERA)` | 应用详情页 |
+| 通知权限 | `NotificationManager.areNotificationsEnabled()` | 通知设置页 |
+| 精确闹钟 | `AlarmManager.canScheduleExactAlarms()` | 精确闹钟设置页 |
+| 忽略电池优化 | `PowerManager.isIgnoringBatteryOptimizations()` | 电池优化设置页 |
 
-运行时序：
+还有一个「系统设置」入口统一跳应用详情页，用于设置自启动、后台活动等
+国产 ROM 特有的选项（这些没有标准 API 检测，只做跳转入口，不显示假状态）。
 
-```
-深度休眠 → AlarmManager 唤醒 → 前台服务启动
-  → 取配置（本地 + 远程）→ 拍照（主镜头 → 备用镜头 → 黑图）
-  → 加水印 → 存盘 → 更新通知 + 设备份闹钟
-  → 更新 config（captureCount + lastCaptureTime）→ 服务停止 → 深度休眠
-```
+## 深度专题：Bitmap 内存优化
 
-## 深度专题 1：Bitmap 内存优化
+这是本项目最值得深入的性能优化案例。以 1920×1080 ARGB_8888 计算：
+单像素 4 bytes × 1920 × 1080 ≈ **8.3 MB / 张**
 
-### 优化前 vs 优化后
+### 优化前：峰值 3 张图（~25MB）
 
 ```
-优化前：raw → 旋转 → copy → 水印 → compress → recycle
-        ~8MB    ~8MB   ~8MB                （峰值 ~25MB）
-
-优化后：raw → 旋转(同对象替换) → 直接绘制水印 → compress → recycle
-        ~8MB   （短暂 2 张后立即回收）       （峰值 ~8MB）
+decodeImage()                     WatermarkProcessor.apply()
+     │                                   │
+     ▼                                   ▼
+[raw Bitmap] ──旋转──▶ [rotated Bitmap] ──copy──▶ [watermarked Bitmap]
+     │                    │                              │
+     │  raw.recycle()      │  输入被 copy 后 recycle       │
+                            ▼                              ▼
+                     （中间短暂 2 张）                LocalPhotoStorage.save()
+                                                       compress + recycle
 ```
 
-### 关键改动
+**问题根源**：WatermarkProcessor 为了"不修改输入"做了一次全尺寸 copy，
+但输入 bitmap 是刚从相机出来的、没有其他引用的临时对象，copy 完全没有必要。
 
-1. `CameraXController.decodeImage()`：`inMutable = true`，解码出可变 Bitmap
-2. `WatermarkProcessor.apply()`：移除 `bitmap.copy()`，直接 Canvas 绘制到输入 Bitmap 上
-3. 责任链：CameraXController 创建 → WatermarkProcessor 绘制 → LocalPhotoStorage 存盘后 recycle
-
-### 责任链模式
+### 优化后：峰值 1 张图（~8MB）
 
 ```
-CameraXController          WatermarkProcessor         LocalPhotoStorage
-     │                          │                        │
-  创建 Bitmap               在 Bitmap 上绘制            compress + recycle
-     │                          │                        │
-     └──────── 不 copy ─────────┴────── 不 copy ──────────┘
-              （任何时刻内存中只有 1 个 Bitmap）
+CameraXController
+  inMutable = true  ← 关键：解码为可变 Bitmap
+     │
+     ▼
+[mutable Bitmap] ──旋转──▶ [mutable Bitmap] （同对象或新对象，旧的立即回收）
+     │
+     ├── WatermarkProcessor.apply() → Canvas 直接绘制，零额外内存
+     │
+     └── LocalPhotoStorage.save() → compress + recycle（责任链终点）
 ```
 
-### GC 压力视角
+**两处改动**：
+1. `BitmapFactory.Options.inMutable = true` → 解码出可变 Bitmap
+2. `WatermarkProcessor` 移除 `bitmap.copy()` → 直接在输入上绘制
 
-单次拍摄产生 ~2MB 临时对象（JPEG bytes + BitmapFactory 内部缓冲）。在小时级间隔下，GC 压力可忽略不计。仅在秒级间隔 + 低内存设备上才需要进一步优化（如 inBitmap 复用）。
+### 什么时候才需要 copy？
 
-## 深度专题 2：Android 生命周期与初始化时机
+- 原始 Bitmap 还有其他引用（如缓存池复用）
+- 需要保留原始图像（如先显示原图再加水印）
+- 函数是公共 API，调用方可能依赖输入不变
 
-### 问题根源
+本项目的流水线是单向的（相机→水印→存盘→回收），copy 是纯粹的浪费。
 
-UI 可见性、业务执行、数据初始化三者混淆，导致 `lateinit` 在被消费时还未初始化。
+### 延伸讨论：GC 压力视角
 
-### 真实 bug 演变
+除了"峰值内存"，另一个值得关注的维度是**分配速率**——单位时间产生多少需要 GC 回收的临时对象。
 
+单次拍摄产生的临时对象：
+- `ByteArray`（JPEG 原始数据，~2MB）
+- `BitmapFactory` 内部临时缓冲区
+- `compress()` 过程中的临时 ByteBuffer
+- 每轮创建的 `CameraXController` 等对象
+
+这些都是短生命周期对象，理论上全部在 Young Gen 回收，不触发 Full GC。但在**两个极端场景**下需要留意：
+
+1. **短间隔拍摄**（如 15 秒）：每分钟分配几十 MB，旧手机（2GB 内存）Young Gen 小，可能更频繁地 GC。不过延时相机的典型场景是小时级间隔，实际影响可以忽略。
+
+2. **系统内存压力大时**：GC 阈值降低，本来能在 Young Gen 回收的对象可能被提早晋升到 Old Gen，增加 Full GC 概率。但这是系统级问题，App 层面能做的有限。
+
+**结论**：当前设计在典型使用场景下（分钟/小时级间隔）GC 压力可以忽略。只有当你要做秒级延时视频时，才需要考虑 `inBitmap` 复用、对象池等进一步优化。
+
+## 深度专题：Android 生命周期与初始化时机
+
+这是 Android 开发中最容易踩坑的地方，也是本项目在开发过程中真实经历的 bug。
+
+### 问题根源：UI 生命周期 ≠ 业务生命周期
+
+开发者（尤其是初学者）容易把三件事搞混：
+
+1. **UI 可见性**（Fragment `onResume`/`onPause`）—— 用户是否能看到界面
+2. **业务执行**（Service `captureLoop`）—— 拍摄是否在进行
+3. **数据初始化**（属性赋值时机）—— config/storage 何时可用
+
+这三者是独立的，但开发者经常把它们绑在一起。
+
+### 我们踩过的真实 bug
+
+本项目经历了三个阶段，恰好展示了这个问题的演变：
+
+#### 阶段 1：`by lazy`（碰巧能工作）
+
+```kotlin
+// 原始代码
+private val storage by lazy { LocalPhotoStorage(applicationContext) }
 ```
-阶段 1：by lazy（碰巧能工作）
-  storage by lazy { LocalPhotoStorage(ctx) }
-  → 首次访问延迟到 onResume，碰巧 ctx 已可用
-  → 但"碰巧"是隐式假设，代码里看不出来
 
-阶段 2：重构改成 lateinit（暴露了 ordering bug）
-  lateinit var storage
-  → 在 onViewCreated 消费，但 onResume 才赋值
-  → 崩溃：UninitializedPropertyAccessException
+`by lazy` 延迟到首次访问，碰巧 `onResume` 才访问，此时 context 已可用。
+**问题**：这个"碰巧"是隐式假设，代码里完全看不出来。一旦重构改变了访问时机，bug 立即暴露。
 
-阶段 3：onCreate() 初始化 + reloadFromDisk()（正确模式）
-  onCreate() → storage = create(load())     ← 保证首次初始化
-  onResume() → reloadFromDisk()             ← 单一数据源刷新
-  → config 和 storage 同源，不再依赖调用顺序
+#### 阶段 2：重构改成 `lateinit`（暴露 ordering bug）
+
+```kotlin
+// 重构后
+private lateinit var storage: IPhotoStorage
+
+override fun onViewCreated(...) {
+    storage = PhotoStorageFactory.create(...)  // ← 这里消费 config，但 config 还没赋值！
+    // → UninitializedPropertyAccessException 崩溃
+}
+
+override fun onResume() {
+    config = CaptureConfig.load(...)  // ← 太晚了，onViewCreated 已经崩了
+}
+```
+
+`by lazy` 的延迟保护消失了，`lateinit` 需要开发者手动保证初始化时机，但没做到。
+
+#### 阶段 3：`onCreate()` 初始化 + 单一数据源（正确模式）
+
+```kotlin
+private lateinit var config: CaptureConfig
+private lateinit var storage: IPhotoStorage
+
+override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+    config = CaptureConfig.load(requireContext())       // ← 最早安全位置
+    storage = PhotoStorageFactory.create(requireContext(), config)
+}
+
+override fun onResume() {
+    super.onResume()
+    reloadFromDisk()  // ← 刷新，不是初始化
+}
+
+private fun reloadFromDisk() {
+    config = CaptureConfig.load(requireContext())       // ← 读一次
+    storage = PhotoStorageFactory.create(requireContext(), config)  // ← 从同一份 config 派生
+}
 ```
 
 ### 三条规则
 
-1. **分清"需要什么"→ 决定"在哪里初始化"**
-   - 只需要 Context → `onCreate()`
-   - 需要视图 → `onViewCreated()`
+#### 规则 1：分清"需要什么"→ 决定"在哪里初始化"
 
-2. **UI 是观察者，不是控制器**
-   - Fragment → 发指令(Intent) → Service 自主执行
-   - Fragment → 读 config → 显示状态
+| 依赖什么 | 初始化位置 | 例子 |
+|---------|-----------|------|
+| 只需要 Context（`onAttach` 之后可用） | `onCreate()` | config、storage、camera |
+| 需要视图（`onCreateView` 之后可用） | `onViewCreated()` | binding、adapter、点击监听 |
 
-3. **单一数据源**
-   - config 和由它派生的对象来自同一次 `CaptureConfig.load()` 调用
+**原则：在最早安全的位置初始化，不要等到"刚好要用"才赋值。**
+
+#### 规则 2：UI 是观察者，不是控制器
+
+```
+❌ 错误心智模型：  Fragment → 触发拍摄 → Service 执行
+✅ 正确心智模型：  Fragment → 发指令(Intent) → Service 自己决定何时执行
+                  Fragment → 读 config → 显示状态
+```
+
+- `StatusFragment` 的 `onResume()` 只做**显示刷新**（reload config + updateUI），不做业务决策
+- `SettingsFragment` 只写 config 和发 `startForegroundService` 指令，不直接控制拍摄
+- `CaptureService` 的 `captureLoop` **完全独立于 Fragment 生命周期**——Fragment 可以不存在，Service 照常拍
+
+#### 规则 3：单一数据源
+
+```kotlin
+❌ 两次独立读取，config 和 storage 可能不一致：
+   storage = create(CaptureConfig.load(...))   // 第 1 次读
+   config = CaptureConfig.load(...)            // 第 2 次读
+
+✅ 一次读取，config 和 storage 同源：
+   config = CaptureConfig.load(...)           // 读一次
+   storage = create(config)                    // 从同一份 config 派生
+```
+
+`reloadFromDisk()` 方法封装了这个模式，保证 `config` 和 `storage` 永远来自同一次磁盘读取。
+
+### Fragment 的双重生命周期
+
+Fragment 比 Service 更复杂，因为它有**两套生命周期**：
+
+```
+Fragment 生命周期:  onCreate → ... → onDestroy
+View 生命周期:      onCreateView → onViewCreated → ... → onDestroyView
+```
+
+| 属性类别 | 依赖 | 初始化 | 清理 |
+|---------|------|--------|------|
+| 不需要 View | Context | `onCreate()` | `onDestroy()`（或不需要） |
+| 需要 View | binding | `onViewCreated()` | `onDestroyView()` 置 null |
+
+本项目的实践：
+- `config`、`storage` → `onCreate()` 初始化（只需要 Context）
+- `_binding` → `onCreateView()` 初始化，`onDestroyView()` 置 null（需要 View）
+- `onResume()` → 只调 `reloadFromDisk()` 刷新数据，不做初始化
+
+### 时序保证
+
+```
+onCreate()         ← 所有 lateinit 在此完成（context 可用）
+  ↓
+onCreateView()     ← 创建视图
+  ↓
+onViewCreated()    ← 只做 view 绑定和监听设置
+  ↓
+onResume()         ← 刷新数据（reloadFromDisk），但属性已在 onCreate 就绪
+  ↓
+...（协程、刷新循环等都可以安全访问所有属性）
+```
+
+**核心保证**：无论哪个生命周期回调或协程访问 `config` / `storage`，都不会遇到 `UninitializedPropertyAccessException`。`onResume()` 的重新赋值是"刷新"而非"初始化"——即使 `onResume` 不执行，属性也已经有值了。
 
 ## 构建与安装
 
-### 环境要求
+### 用 Android Studio（推荐）
 
-- Android Studio Hedgehog (2023.1) 或更高
-- JDK 17
-- Android SDK 34
-
-### 步骤
-
-1. 用 Android Studio 打开项目根目录
+1. 打开 Android Studio → File → Open → 选择项目目录
 2. 等待 Gradle 同步完成
-3. 连接 Android 手机（开启 USB 调试）
-4. 点击 Run 按钮
+3. 连接手机（开启 USB 调试）→ 点击 Run
 
-### 权限说明
+### 用命令行
 
-| 权限 | 用途 | 何时需要 |
-|------|------|---------|
-| CAMERA | 拍照 | 使用相机时 |
-| FOREGROUND_SERVICE | 前台服务保活 | 开始拍摄时 |
-| FOREGROUND_SERVICE_CAMERA | 前台服务类型声明 | Android 14+ |
-| RECEIVE_BOOT_COMPLETED | 开机自启 | 勾选自动启动后 |
-| WRITE_EXTERNAL_STORAGE | 写 DCIM（API 26-28） | 仅选 DCIM 存储且 API ≤ 28 |
-| POST_NOTIFICATIONS | 通知权限 | Android 13+ |
+```bash
+# 生成 Gradle Wrapper（首次）
+gradle wrapper
+
+# 构建 Debug APK
+./gradlew assembleDebug
+
+# 安装到已连接的设备
+./gradlew installDebug
+```
 
 ## 使用指南
 
-1. **设置参数**：打开 App → 设置 Tab → 配置拍摄间隔、摄像头、水印、存储位置
-2. **权限确认**：设置 Tab → 权限与保活 → 逐项授权
-3. **构图对准**：预览 Tab → 实时预览 → 立即拍一张验证效果
-4. **开始拍摄**：状态 Tab → 点击"开始" → 通知栏出现倒计时
-5. **查看状态**：状态 Tab → 倒计时 + 最近照片缩略图 + 电量/存储
-6. **浏览照片**：相册 Tab → 网格照片列表
+1. 打开 App，默认进入「状态」页
+2. 切到「预览」Tab，对准景物，点「立即拍一张」验证构图和水印效果
+3. 切到「设置」Tab，调整拍摄间隔、摄像头方向、水印开关等
+4. 在「权限与保活」分组检查各项权限，点击未授权的项跳转授予
+5. 回到「状态」页，点击「开始拍摄」
+6. 手机可以锁屏放置，App 会自动在设定间隔唤醒拍照
+7. 随时切到「相册」Tab 查看历史照片
 
-## 存储路径说明
+### 远程配置协议
 
-| 存储位置 | 路径 | 权限 | 卸载后 |
-|---------|------|------|--------|
-| App 私有目录 | `/Android/data/.../files/Pictures/TimeLapse/` | 无 | 删除 |
-| 系统相册 (DCIM) | `/DCIM/TimeLapse/` | API 26-28 需权限 | 保留 |
-| SD 卡 | SD 卡 App 私有目录 | 无 | 删除 |
+如填写了远程配置 URL，每次拍摄前会 GET 该 URL，期望返回一个 15-3600 的整数作为下次拍摄延迟（秒）。
+
+- URL 返回有效整数 → 使用该值作为下次间隔
+- URL 返回无效或请求失败 → 回退到上次有效值，再回退到本地配置
+
+示例服务器响应：`300`（表示下次 5 分钟后拍摄）
+
+### 照片存储位置
+
+支持三种预设存储位置，在设置页选择：
+
+| 位置 | 路径 | 权限 | 卸载后 | 系统相册可见 |
+|------|------|------|--------|------------|
+| App 私有目录 | `/Android/data/.../Pictures/TimeLapse/` | 无 | 照片删除 | 否 |
+| 系统相册 (DCIM) | `/DCIM/TimeLapse/` | API 26-28 需权限 | 照片保留 | 是 |
+| SD 卡 | `/SD卡/Android/data/.../Pictures/TimeLapse/` | 无 | 照片删除 | 否 |
+
+App 私有目录和 SD 卡通过 `File.mkdir()` 按年月归档；DCIM 通过 `MediaStore.RELATIVE_PATH` 指定子目录，由系统管理。
+
+```
+TimeLapse/
+  ├── 2026-03/
+  │   ├── 20260301_080000.jpg
+  │   └── 20260301_090000.jpg
+  └── 2026-04/
+      └── ...
+```
+
+**存储策略的教学要点**：
+- App 私有目录：`getExternalFilesDir()` 无需权限，File API 直接操作，最简单
+- DCIM 公共目录：API 29+ 必须用 `MediaStore` API（Scoped Storage），API 26-28 用 File API + `WRITE_EXTERNAL_STORAGE`
+- SD 卡：`getExternalFilesDirs()` 返回数组，`[0]` 是内部存储，`[1]+` 是 SD 卡，复用 App 私有目录逻辑
+- 工厂模式：`PhotoStorageFactory` 根据配置创建不同实现，调用方只依赖 `IPhotoStorage` 接口
 
 ## 扩展方向
 
-- 迁移 SharedPreferences → DataStore（练习异步配置管理）
-- 相册延时连播（按顺序快速播放照片序列）
-- 云端备份（加密上传照片到云存储）
-- FIFO 自动删旧（存储满时自动删除最早的照片）
-- 国产 ROM 自启动跳转适配（按 Build.BRAND 分发 Intent）
-- 深色模式适配
-- 单元测试（CaptureConfig、WatermarkProcessor、PhotoStorageFactory）
-- ProGuard/R8 规则（Release 构建混淆）
+| 方向 | 实现方式 |
+|------|---------|
+| 自动清理旧照片 | 新增 `FifoPhotoStorage` 实现 `IPhotoStorage` |
+| 云端上传 | 新增 `CloudPhotoStorage` 实现 `IPhotoStorage` |
+| 兼容更老设备 | 新增 `Camera1Controller` 实现 `ICameraController` |
+| 位置水印 | `WatermarkOptions` 增加 GPS 参数 |
+| 延时视频连播 | GalleryFragment 增加连播功能 |
+| 远程监控 | 新增 HTTP API，展示拍摄状态和最近照片 |
+
+## 技术栈
+
+- **语言**：Kotlin
+- **最低 API**：26 (Android 8.0)
+- **目标 API**：34 (Android 14)
+- **异步**：Kotlin Coroutines
+- **相机**：CameraX (Preview + ImageCapture)
+- **UI**：ViewBinding + Material Components + Fragment
+- **图片加载**：Coil
+- **保活**：前台服务 + START_STICKY + AlarmManager 备份
+- **通知**：setChronometerCountDown（系统自动倒计时）
