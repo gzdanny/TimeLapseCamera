@@ -1,0 +1,308 @@
+package com.timelapse.camera.service
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.os.IBinder
+import android.os.PowerManager
+import android.util.Log
+import androidx.core.app.NotificationCompat
+import com.timelapse.camera.MainActivity
+import com.timelapse.camera.R
+import com.timelapse.camera.camera.CameraXController
+import com.timelapse.camera.camera.ICameraController
+import com.timelapse.camera.config.CaptureConfig
+import com.timelapse.camera.config.RemoteConfigFetcher
+import com.timelapse.camera.model.CaptureResult
+import com.timelapse.camera.scheduler.CaptureScheduler
+import com.timelapse.camera.storage.IPhotoStorage
+import com.timelapse.camera.storage.PhotoStorageFactory
+import com.timelapse.camera.util.BatteryMonitor
+import com.timelapse.camera.watermark.WatermarkOptions
+import com.timelapse.camera.watermark.WatermarkProcessor
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/**
+ * 拍摄前台服务 —— 持久化运行，编排拍摄循环。
+ *
+ * 架构（前台服务保活 + 协程计时 + 闹钟备份）：
+ *   用户点击开始 → startForegroundService(ACTION_START)
+ *   → 服务常驻，通知栏显示倒计时
+ *   → 协程循环：拍照 → 存盘 → 更新倒计时 → delay(间隔) → 重复
+ *   → 用户点击停止或系统杀掉 → 结束
+ *
+ * 三层保活机制：
+ * 1. 前台服务通知 —— 进程不被系统主动杀死（主要）
+ * 2. START_STICKY —— 被杀后系统尽量重启
+ * 3. AlarmManager 备份 —— 每次拍摄后设闹钟，服务被杀则闹钟重启
+ *
+ * 教学要点：
+ * - setChronometerCountDown(true) 让系统自动渲染倒计时，App 无需定时刷新通知
+ * - WakeLock 仅在拍摄瞬间持有（秒级），间隔期靠前台通知保活，不持锁
+ * - withContext(NonCancellable) 确保 stopForeground/stopSelf 在协程取消后仍执行
+ */
+class CaptureService : Service() {
+
+    companion object {
+        const val ACTION_START = "com.timelapse.camera.START"
+        const val ACTION_STOP = "com.timelapse.camera.STOP"
+        private const val TAG = "CaptureService"
+        private const val CHANNEL_ID = "timelapse_capture"
+        private const val NOTIFICATION_ID = 1
+    }
+
+    /**
+     * 服务级协程作用域：随服务 onCreate 创建，onDestroy 取消。
+     *
+     * 为什么用 SupervisorJob？
+     * - 子协程（如 captureLoop）失败不会取消整个 scope 和其他兄弟协程
+     * - 将来如果加上传、日志等子协程，互不影响
+     *
+     * 生命周期边界：onCreate → onDestroy，与服务完全一致。
+     */
+    private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val watermarkProcessor = WatermarkProcessor()
+    private val remoteConfigFetcher = RemoteConfigFetcher()
+    private lateinit var storage: IPhotoStorage
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var captureJob: Job? = null
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        storage = PhotoStorageFactory.create(applicationContext, CaptureConfig.load(applicationContext))
+        createNotificationChannel()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_STOP -> {
+                Log.i(TAG, "收到停止指令")
+                CaptureConfig.load(applicationContext)
+                    .copy(isRunning = false)
+                    .save(applicationContext)
+                CaptureScheduler.get(applicationContext).cancel()
+                captureJob?.cancel()
+                // 不立即 stopSelf，让 captureLoop 的 finally 块优雅退出
+                return START_NOT_STICKY
+            }
+            else -> {
+                // ACTION_START 或 null（START_STICKY 恢复）
+                val config = CaptureConfig.load(applicationContext)
+                // 恢复运行状态
+                if (!config.isRunning) {
+                    config.copy(isRunning = true).save(applicationContext)
+                }
+                val initialDelay = if (config.lastRemoteInterval > 0)
+                    config.lastRemoteInterval else config.intervalSeconds
+                startForeground(NOTIFICATION_ID, buildNotification(initialDelay))
+
+                if (captureJob == null || !captureJob!!.isActive) {
+                    captureJob = serviceScope.launch { captureLoop() }
+                }
+                return START_STICKY
+            }
+        }
+    }
+
+    /**
+     * 拍摄循环：拍照 → 水印 → 存盘 → 更新倒计时 → 协程等待 → 重复
+     *
+     * Bitmap 内存责任链（教学要点）：
+     *   CameraXController 创建 → WatermarkProcessor 直接绘制 → IPhotoStorage 存盘后 recycle
+     *   ↑                    ↑                        ↑
+     *   1 个 mutable Bitmap 对象在链上传递，全程峰值 = 单张图大小（~8MB）
+     *
+     * 被取消时（用户停止 / 服务被杀），finally 块清理并停止服务
+     */
+    private suspend fun captureLoop() {
+        try {
+            while (true) {
+                var config = CaptureConfig.load(applicationContext)
+                if (!config.isRunning) break
+
+                // ── 0. 检测存储位置是否变更，变更则重建 storage 实例 ──
+                storage = PhotoStorageFactory.create(applicationContext, config)
+
+                // ── 1. 远程配置：拉取下次拍摄延迟 ──
+                var nextDelay = config.intervalSeconds
+                if (!config.remoteConfigUrl.isNullOrBlank()) {
+                    val remoteDelay = remoteConfigFetcher.fetchNextInterval(config.remoteConfigUrl!!)
+                    if (remoteDelay != null) {
+                        nextDelay = remoteDelay
+                        config = config.copy(lastRemoteInterval = remoteDelay)
+                        config.save(applicationContext)
+                    } else if (config.lastRemoteInterval > 0) {
+                        nextDelay = config.lastRemoteInterval
+                    }
+                }
+
+                // ── 2. 拍摄（WakeLock 仅在此阶段持有）──
+                acquireWakeLock()
+                val timestamp = System.currentTimeMillis()
+                try {
+                    val camera: ICameraController = CameraXController(applicationContext, config.cameraFacing)
+                    val result = camera.capture()
+
+                    // 构建水印配置（电量/存储/温度从系统读取）
+                    val watermarkOptions = buildWatermarkOptions(config)
+
+                    // 拍摄成功：正常水印 + 存盘
+                    // 拍摄失败：生成黑图占位 + 存盘（用户翻照片时能看到"App醒了但摄像头挂了"）
+                    val bitmapToSave = when (result) {
+                        is CaptureResult.Success -> {
+                            watermarkProcessor.apply(result.bitmap, result.timestamp, watermarkOptions)
+                        }
+                        is CaptureResult.Failure -> {
+                            Log.e(TAG, "拍摄失败: ${result.message}", result.cause)
+                            watermarkProcessor.createErrorBitmap(timestamp)
+                        }
+                    }
+
+                    // 写入磁盘也可能失败（磁盘满、IO 错误等）
+                    // 失败了就打 Log，不崩溃，等下一轮继续（释放资源是关键）
+                    runCatching {
+                        storage.save(bitmapToSave, timestamp)
+                    }.onSuccess {
+                        if (result is CaptureResult.Success) {
+                            config = config.copy(
+                                captureCount = config.captureCount + 1,
+                                lastCaptureTime = timestamp
+                            )
+                            config.save(applicationContext)
+                            Log.i(TAG, "拍摄完成 #${config.captureCount}")
+                        } else {
+                            Log.w(TAG, "黑图占位已保存（拍摄失败）")
+                        }
+                    }.onFailure { e ->
+                        Log.e(TAG, "写入磁盘失败", e)
+                        bitmapToSave.recycle() // 写入失败也要手动回收，避免内存泄漏
+                    }
+                } finally {
+                    releaseWakeLock()
+                }
+
+                // ── 3. 更新倒计时通知（系统自动渲染，零功耗）──
+                updateNotification(nextDelay)
+
+                // ── 4. AlarmManager 备份：服务被杀后闹钟重启 ──
+                CaptureScheduler.get(this).scheduleNext(nextDelay)
+
+                // ── 5. 协程等待（主调度，间隔期不持 WakeLock）──
+                delay(nextDelay * 1000L)
+            }
+        } finally {
+            withContext(NonCancellable) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+        }
+    }
+
+    /**
+     * 从配置和系统状态构建 WatermarkOptions。
+     * 电量/存储/温度都是拍摄瞬间读取的，反映真实状态。
+     */
+    private fun buildWatermarkOptions(config: CaptureConfig): WatermarkOptions =
+        WatermarkOptions(
+            customText = config.watermarkText,
+            showBattery = config.watermarkShowBattery,
+            showStorage = config.watermarkShowStorage,
+            showTemperature = config.watermarkShowTemperature,
+            batteryPercent = BatteryMonitor.getBatteryPercent(applicationContext),
+            storageRemainingGb = BatteryMonitor.getStorageRemainingGb(storage.getPhotoDir()),
+            temperatureCelsius = BatteryMonitor.getBatteryTemperature(applicationContext)
+        )
+
+    // ────────────────── WakeLock ──────────────────
+
+    private fun acquireWakeLock() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "TimeLapseCamera:Capture"
+        ).apply { acquire(30_000) }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
+    }
+
+    // ────────────────── 通知（含倒计时）──────────────────
+
+    private fun createNotificationChannel() {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            nm.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_ID,
+                    getString(R.string.channel_name),
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = getString(R.string.channel_desc)
+                    setShowBadge(false)
+                }
+            )
+        }
+    }
+
+    /**
+     * 构建带倒计时的通知：
+     * setChronometerCountDown(true) + setWhen(未来时间戳) → 系统自动渲染倒计时
+     * App 无需定时刷新通知，零额外功耗
+     *
+     * 点击通知跳转到 MainActivity，这是前台服务通知的标准做法。
+     */
+    private fun buildNotification(nextDelaySeconds: Int): Notification {
+        // 点击通知跳转到主界面
+        val contentIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            },
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val nextTime = System.currentTimeMillis() + nextDelaySeconds * 1000L
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(getString(R.string.notif_title))
+            .setContentText(getString(R.string.notif_countdown))
+            .setSmallIcon(R.drawable.ic_camera)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(contentIntent)
+            .setWhen(nextTime)
+            .setShowWhen(true)
+            .setUsesChronometer(true)
+            .setChronometerCountDown(true)
+            .build()
+    }
+
+    private fun updateNotification(nextDelaySeconds: Int) {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIFICATION_ID, buildNotification(nextDelaySeconds))
+    }
+
+    override fun onDestroy() {
+        captureJob?.cancel()
+        releaseWakeLock()
+        serviceScope.cancel()
+        super.onDestroy()
+    }
+}

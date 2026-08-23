@@ -1,0 +1,118 @@
+package com.timelapse.camera.config
+
+import android.content.Context
+import android.content.SharedPreferences
+import android.hardware.camera2.CameraCharacteristics
+
+/**
+ * 存储位置枚举。
+ *
+ * 教学要点：用枚举而非字符串，避免拼写错误导致运行时崩溃。
+ * - APP_PRIVATE: App 私有目录，无需权限，卸载后照片删除
+ * - DCIM: 系统相册公共目录，卸载后照片保留，系统相册可见
+ * - SD_CARD: SD 卡 App 私有目录，无需权限，卸载后照片删除
+ */
+enum class StorageLocation {
+    APP_PRIVATE,
+    DCIM,
+    SD_CARD;
+
+    companion object {
+        fun fromName(name: String?): StorageLocation =
+            name?.let { runCatching { valueOf(it) }.getOrNull() } ?: APP_PRIVATE
+    }
+}
+
+/**
+ * 拍摄配置 —— 所有可调参数集中在此，通过 SharedPreferences 持久化。
+ *
+ * 教学要点：
+ * - 用 data class + copy() 实现不可变配置，避免运行期被意外修改
+ * - 每个字段都有默认值，首次运行不会崩
+ */
+data class CaptureConfig(
+    /** 拍摄间隔（秒），远程配置可动态覆盖此值 */
+    val intervalSeconds: Int = 3600,
+    /** 摄像头方向：后摄 LENS_FACING_BACK / 前摄 LENS_FACING_FRONT */
+    val cameraFacing: Int = CameraCharacteristics.LENS_FACING_BACK,
+    /** 自定义水印文字，null 表示仅显示时间戳 */
+    val watermarkText: String? = null,
+    /** 水印是否显示电量 */
+    val watermarkShowBattery: Boolean = true,
+    /** 水印是否显示剩余存储 */
+    val watermarkShowStorage: Boolean = true,
+    /** 水印是否显示电池温度 */
+    val watermarkShowTemperature: Boolean = false,
+    /** 远程配置 URL，返回 15-3600 整数作为下次拍摄延迟，null 表示不使用远程配置 */
+    val remoteConfigUrl: String? = null,
+    /** 拍摄是否正在运行 */
+    val isRunning: Boolean = false,
+    /** 已拍摄张数 */
+    val captureCount: Int = 0,
+    /** 上次有效远程间隔（远程失败时回退使用） */
+    val lastRemoteInterval: Int = 0,
+    /** 上次成功拍摄的时间戳（用于 UI 推算真实倒计时） */
+    val lastCaptureTime: Long = 0,
+    /** 照片存储位置 */
+    val storageLocation: StorageLocation = StorageLocation.APP_PRIVATE
+) {
+    fun save(context: Context) {
+        prefs(context).edit().apply {
+            putInt(KEY_INTERVAL, intervalSeconds)
+            putInt(KEY_CAMERA_FACING, cameraFacing)
+            putString(KEY_WATERMARK, watermarkText)
+            putBoolean(KEY_WATERMARK_BATTERY, watermarkShowBattery)
+            putBoolean(KEY_WATERMARK_STORAGE, watermarkShowStorage)
+            putBoolean(KEY_WATERMARK_TEMP, watermarkShowTemperature)
+            putString(KEY_REMOTE_URL, remoteConfigUrl)
+            putBoolean(KEY_IS_RUNNING, isRunning)
+            putInt(KEY_CAPTURE_COUNT, captureCount)
+            putInt(KEY_LAST_REMOTE_INTERVAL, lastRemoteInterval)
+            putLong(KEY_LAST_CAPTURE_TIME, lastCaptureTime)
+            putString(KEY_STORAGE_LOCATION, storageLocation.name)
+            apply()
+        }
+    }
+
+    companion object {
+        private const val PREFS_NAME = "timelapse_config"
+        private const val KEY_INTERVAL = "interval_seconds"
+        private const val KEY_CAMERA_FACING = "camera_facing"
+        private const val KEY_WATERMARK = "watermark_text"
+        private const val KEY_WATERMARK_BATTERY = "watermark_battery"
+        private const val KEY_WATERMARK_STORAGE = "watermark_storage"
+        private const val KEY_WATERMARK_TEMP = "watermark_temperature"
+        private const val KEY_REMOTE_URL = "remote_config_url"
+        private const val KEY_IS_RUNNING = "is_running"
+        private const val KEY_CAPTURE_COUNT = "capture_count"
+        private const val KEY_LAST_REMOTE_INTERVAL = "last_remote_interval"
+        private const val KEY_LAST_CAPTURE_TIME = "last_capture_time"
+        private const val KEY_STORAGE_LOCATION = "storage_location"
+
+        @Volatile private var prefsInstance: SharedPreferences? = null
+
+        private fun prefs(context: Context): SharedPreferences =
+            prefsInstance ?: synchronized(this) {
+                prefsInstance ?: context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .also { prefsInstance = it }
+            }
+
+        fun load(context: Context): CaptureConfig {
+            val prefs = prefs(context)
+            return CaptureConfig(
+                intervalSeconds = prefs.getInt(KEY_INTERVAL, 3600),
+                cameraFacing = prefs.getInt(KEY_CAMERA_FACING, CameraCharacteristics.LENS_FACING_BACK),
+                watermarkText = prefs.getString(KEY_WATERMARK, null),
+                watermarkShowBattery = prefs.getBoolean(KEY_WATERMARK_BATTERY, true),
+                watermarkShowStorage = prefs.getBoolean(KEY_WATERMARK_STORAGE, true),
+                watermarkShowTemperature = prefs.getBoolean(KEY_WATERMARK_TEMP, false),
+                remoteConfigUrl = prefs.getString(KEY_REMOTE_URL, null),
+                isRunning = prefs.getBoolean(KEY_IS_RUNNING, false),
+                captureCount = prefs.getInt(KEY_CAPTURE_COUNT, 0),
+                lastRemoteInterval = prefs.getInt(KEY_LAST_REMOTE_INTERVAL, 0),
+                lastCaptureTime = prefs.getLong(KEY_LAST_CAPTURE_TIME, 0),
+                storageLocation = StorageLocation.fromName(prefs.getString(KEY_STORAGE_LOCATION, null))
+            )
+        }
+    }
+}

@@ -1,0 +1,101 @@
+<resources>
+    <string name="app_name">延时相机</string>
+
+    <!-- 底部导航 -->
+    <string name="tab_status">状态</string>
+    <string name="tab_preview">预览</string>
+    <string name="tab_gallery">相册</string>
+    <string name="tab_settings">设置</string>
+
+    <!-- 通知渠道 -->
+    <string name="channel_name">拍摄服务</string>
+    <string name="channel_desc">拍摄期间显示通知，确保服务不被系统杀死</string>
+    <string name="notif_title">延时拍摄运行中</string>
+    <string name="notif_countdown">下次拍摄倒计时</string>
+
+    <!-- 状态页 -->
+    <string name="status_running">● 运行中</string>
+    <string name="status_stopped">○ 未运行</string>
+    <string name="status_next_capture">下次拍摄倒计时</string>
+    <string name="status_latest_photo">最近一张</string>
+    <string name="status_no_photo_yet">暂无照片</string>
+    <string name="status_stats">统计信息</string>
+    <string name="status_count_format">📷 已拍摄：%1$d 张</string>
+    <string name="status_battery_format">🔋 电量：%1$d%%</string>
+    <string name="status_storage_format">💾 存储：%1$.1f GB 剩余</string>
+    <string name="status_temperature_format">🌡 温度：%1$.0f°C</string>
+
+    <!-- 控制按钮 -->
+    <string name="btn_start">开始拍摄</string>
+    <string name="btn_stop">停止拍摄</string>
+
+    <!-- 预览页 -->
+    <string name="btn_test_capture">立即拍一张</string>
+    <string name="preview_capture_hint">试拍验证构图和水印效果</string>
+    <string name="preview_test_ok">试拍成功 ✓</string>
+    <string name="preview_test_fail">试拍失败</string>
+    <string name="preview_no_camera_permission">请先授予相机权限</string>
+
+    <!-- 相册页 -->
+    <string name="gallery_empty">暂无照片</string>
+
+    <!-- 设置分组 -->
+    <string name="settings_capture_group">拍摄设置</string>
+    <string name="settings_watermark_group">水印设置</string>
+    <string name="settings_permission_group">权限与保活</string>
+    <string name="settings_remote_group">远程配置</string>
+    <string name="settings_about_group">关于</string>
+
+    <!-- 拍摄设置 -->
+    <string name="settings_interval">拍摄间隔</string>
+    <string name="settings_seconds">秒</string>
+    <string name="settings_camera_facing">摄像头</string>
+
+    <!-- 存储设置 -->
+    <string name="settings_storage_group">存储设置</string>
+    <string name="settings_storage_location">存储位置</string>
+    <string name="storage_app_private">App 私有目录</string>
+    <string name="storage_dcim">系统相册 (DCIM)</string>
+    <string name="storage_sd_card">SD 卡</string>
+    <string name="storage_sd_not_available">SD 卡不可用</string>
+
+    <!-- 水印设置 -->
+    <string name="settings_watermark_text">自定义文字</string>
+    <string name="settings_watermark_hint">如：阳台番茄</string>
+    <string name="settings_watermark_battery">显示电量</string>
+    <string name="settings_watermark_storage">显示存储</string>
+    <string name="settings_watermark_temperature">显示温度</string>
+
+    <!-- 权限与保活 -->
+    <string name="settings_camera_permission">相机权限</string>
+    <string name="settings_notification_permission">通知权限</string>
+    <string name="settings_exact_alarm">精确闹钟</string>
+    <string name="settings_battery_optimization">忽略电池优化</string>
+    <string name="settings_app_details">系统设置（自启动/后台等）</string>
+    <string name="settings_go_to_settings">前往 →</string>
+    <string name="permission_granted">已授权</string>
+    <string name="permission_denied">未授权</string>
+    <string name="permission_enabled">已开启</string>
+    <string name="permission_disabled">未开启</string>
+
+    <!-- 远程配置 -->
+    <string name="settings_remote_url_hint">http://example.com/interval</string>
+    <string name="settings_remote_desc">返回 15-3600 整数，作为下次拍摄间隔（秒）</string>
+
+    <!-- 关于 -->
+    <string name="settings_version">版本 1.0.0</string>
+
+    <!-- 摄像头方向（SettingsFragment Spinner 使用） -->
+    <string name="camera_back">后摄</string>
+    <string name="camera_front">前摄</string>
+
+    <!-- 权限拒绝提示（PreviewFragment 使用） -->
+    <string name="perm_camera_denied">相机权限被拒绝，无法拍摄</string>
+
+    <!-- 输入校验 -->
+    <string name="validation_interval_range">拍摄间隔必须在 15 秒 ~ 86400 秒（24 小时）之间，已自动修正</string>
+    <string name="validation_url_invalid">URL 必须以 http:// 或 https:// 开头，未保存</string>
+    <string name="validation_url_verified">URL 验证成功，返回 %1$d 秒</string>
+    <string name="validation_url_fetch_failed">URL 验证失败：无法获取有效数值，未保存</string>
+    <string name="validation_url_verifying">正在验证 URL…</string>
+</resources>
