@@ -17,8 +17,6 @@
     <string name="status_running">● 运行中</string>
     <string name="status_stopped">○ 未运行</string>
     <string name="status_next_capture">下次拍摄倒计时</string>
-    <string name="status_latest_photo">最近一张</string>
-    <string name="status_no_photo_yet">暂无照片</string>
     <string name="status_stats">统计信息</string>
     <string name="status_count_format">📷 已拍摄：%1$d 张</string>
     <string name="status_battery_format">🔋 电量：%1$d%%</string>
@@ -93,8 +91,6 @@
     <string name="settings_version">版本 0.9</string>
 
     <!-- 摄像头方向（SettingsFragment Spinner 使用） -->
-    <string name="camera_back">后摄</string>
-    <string name="camera_front">前摄</string>
 
     <!-- 权限拒绝提示（PreviewFragment 使用） -->
     <string name="perm_camera_denied">相机权限被拒绝，无法拍摄</string>

@@ -18,9 +18,6 @@ import com.timelapse.camera.util.LogBuffer
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * 状态页 Fragment —— 默认首页。
@@ -101,11 +98,10 @@ class StatusFragment : Fragment() {
                 val curStorage = PhotoStorageFactory.create(requireContext(), curConfig)
                 val now = System.currentTimeMillis()
 
-                // 倒计时
-                val remaining = curConfig.lastCaptureTime.let { lastTime ->
-                    if (lastTime > 0) (lastTime + curConfig.intervalSeconds * 1000L).coerceAtLeast(now)
-                    else now + curConfig.intervalSeconds * 1000L
-                } - now
+                // 倒计时：lastCaptureTime > 0 说明循环正在运行
+                val remaining = if (curConfig.lastCaptureTime > 0) {
+                    (curConfig.lastCaptureTime + curConfig.intervalSeconds * 1000L - now).coerceAtLeast(0)
+                } else 0L
                 binding.tvCountdown.text = if (remaining > 0) formatDuration(remaining) else "--:--:--"
 
                 // 运行状态
