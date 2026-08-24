@@ -1,6 +1,5 @@
 package com.timelapse.camera.ui.settings
 
-import android.hardware.camera2.CameraCharacteristics
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -9,6 +8,7 @@ import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import androidx.fragment.app.Fragment
 import com.timelapse.camera.R
+import com.timelapse.camera.camera.CameraEnumerator
 import com.timelapse.camera.config.CaptureConfig
 import com.timelapse.camera.config.StorageLocation
 import com.timelapse.camera.databinding.FragmentSettingsBinding
@@ -43,6 +43,8 @@ class SettingsFragment : Fragment() {
     private val binding get() = _binding!!
 
     private lateinit var config: CaptureConfig
+    /** 枚举到的所有摄像头信息，用于填充下拉列表 */
+    private var cameraList: List<CameraEnumerator.CameraInfo> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,7 +60,7 @@ class SettingsFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        setupCameraFacingSpinner()
+        setupCameraSpinner()
         setupStorageLocationSpinner()
         loadConfigToUI()
         setupListeners()
@@ -86,9 +88,11 @@ class SettingsFragment : Fragment() {
         binding.etStorageThreshold.setText(config.storageThresholdGb.toString())
         binding.etStorageSafeLine.setText(config.storageSafeLineGb.toString())
 
-        // 摄像头方向
-        val position = if (config.cameraFacing == CameraCharacteristics.LENS_FACING_BACK) 0 else 1
-        binding.spinnerCameraFacing.setSelection(position)
+        // 摄像头选择
+        val cameraIndex = cameraList.indexOfFirst { it.cameraId == config.cameraId }
+        if (cameraIndex >= 0) {
+            binding.spinnerCamera.setSelection(cameraIndex)
+        }
 
         // 存储位置
         val storagePosition = config.storageLocation.ordinal.coerceAtMost(
@@ -98,16 +102,23 @@ class SettingsFragment : Fragment() {
         updateStoragePathText(config.storageLocation)
     }
 
-    private fun setupCameraFacingSpinner() {
-        val options = arrayOf(
-            getString(R.string.camera_back),
-            getString(R.string.camera_front)
-        )
+    /**
+     * 摄像头选择下拉：枚举设备所有摄像头，显示方向/像素/焦距，用户精确选择。
+     *
+     * 为什么不用 CameraX 的 BACK/FRONT？
+     * - 多镜头手机（主摄+超广角+长焦+微距）粗粒度选择不可靠
+     * - 直接按 cameraId 选，选到的就是实际使用的，不会错配
+     */
+    private fun setupCameraSpinner() {
+        cameraList = CameraEnumerator.enumerate(requireContext())
+        val displayNames = cameraList.map { info ->
+            "${info.facingName} · ${info.megapixels} · ${info.focalLengthText} [${info.cameraId}]"
+        }
         val adapter = ArrayAdapter(
-            requireContext(), android.R.layout.simple_spinner_item, options
+            requireContext(), android.R.layout.simple_spinner_item, displayNames
         )
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerCameraFacing.adapter = adapter
+        binding.spinnerCamera.adapter = adapter
     }
 
     /**
@@ -162,14 +173,13 @@ class SettingsFragment : Fragment() {
             if (!hasFocus) saveInterval()
         }
 
-        // 摄像头方向
-        binding.spinnerCameraFacing.onItemSelectedListener =
+        // 摄像头选择
+        binding.spinnerCamera.onItemSelectedListener =
             object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                    val facing = if (pos == 0) CameraCharacteristics.LENS_FACING_BACK
-                    else CameraCharacteristics.LENS_FACING_FRONT
-                    if (config.cameraFacing != facing) {
-                        config = config.copy(cameraFacing = facing)
+                    val selectedId = cameraList.getOrNull(pos)?.cameraId ?: return
+                    if (config.cameraId != selectedId) {
+                        config = config.copy(cameraId = selectedId)
                         config.save(requireContext())
                     }
                 }

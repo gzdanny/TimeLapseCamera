@@ -3,12 +3,12 @@ package com.timelapse.camera.camera
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Matrix
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
-import android.util.Log
 import android.util.Size
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -46,10 +46,12 @@ import kotlin.coroutines.resume
  * - ImageCapture.takePicture() 是回调 API，用 suspendCancellableCoroutine 转挂起函数
  * - CameraX 内部有自己的线程池，不需要手动管理 HandlerThread
  * - LifecycleRegistry 手动管理生命周期（Service 不是 LifecycleOwner，需要自己造一个）
+ * - 按 cameraId 选摄像头，而非粗粒度的 facing（多镜头设备精确到具体镜头）
  */
+@OptIn(ExperimentalCamera2Interop::class)
 class CameraXController(
     private val context: Context,
-    private val cameraFacing: Int
+    private val cameraId: String
 ) : ICameraController {
 
     companion object {
@@ -62,38 +64,37 @@ class CameraXController(
     private var lifecycleOwner: LifecycleOwner? = null
 
     override suspend fun capture(): CaptureResult {
-        LogBuffer.log("I", TAG, "开始拍摄, facing=${cameraFacing}")
-        // 主镜头先试
-        val firstResult = captureWithFacing(cameraFacing)
-        if (firstResult is CaptureResult.Success) return firstResult
+        LogBuffer.log("I", TAG, "开始拍摄, cameraId=$cameraId")
+        val result = captureWithCameraId(cameraId)
+        if (result is CaptureResult.Success) return result
 
-        // 失败了切换备用镜头重试一次
-        val otherFacing = otherFacing(cameraFacing)
-        if (otherFacing != null) {
-            LogBuffer.log("W", TAG, "主镜头失败，切换备用镜头 facing=$otherFacing")
-            val fallbackResult = captureWithFacing(otherFacing)
+        // 失败了尝试同方向其他摄像头作为备用
+        val fallbackId = findFallbackCameraId(cameraId)
+        if (fallbackId != null) {
+            LogBuffer.log("W", TAG, "主镜头失败，切换备用镜头 cameraId=$fallbackId")
+            val fallbackResult = captureWithCameraId(fallbackId)
             if (fallbackResult is CaptureResult.Success) return fallbackResult
 
-            val firstMsg = (firstResult as? CaptureResult.Failure)?.message ?: "未知错误"
+            val firstMsg = (result as? CaptureResult.Failure)?.message ?: "未知错误"
             val secondMsg = (fallbackResult as? CaptureResult.Failure)?.message ?: "未知错误"
             return CaptureResult.Failure(
                 "主镜头失败: $firstMsg；备用镜头失败: $secondMsg"
             )
         }
 
-        return firstResult
+        return result
     }
 
     /**
-     * 使用指定方向的摄像头执行一次完整拍摄。
+     * 使用指定 ID 的摄像头执行一次完整拍摄。
      * 内部完成 "初始化 CameraX → 绑定 ImageCapture → 拍照 → 释放" 全流程。
      *
      * 线程安全：CameraX 的 unbindAll/bindToLifecycle 必须在主线程执行。
      * 无论调用者在哪个线程，内部用 withContext(Dispatchers.Main) 保证。
      */
-    private suspend fun captureWithFacing(facing: Int): CaptureResult {
+    private suspend fun captureWithCameraId(id: String): CaptureResult {
         return try {
-            LogBuffer.log("I", TAG, "captureWithFacing 开始, facing=$facing")
+            LogBuffer.log("I", TAG, "captureWithCameraId 开始, id=$id")
 
             val bitmap = withContext(Dispatchers.Main) {
                 val provider = ProcessCameraProvider.getInstance(context).await()
@@ -108,7 +109,7 @@ class CameraXController(
 
                 // 查所选摄像头的最高 JPEG 分辨率，用 ResolutionSelector 精确指定
                 // （setTargetResolution 已废弃，且在部分设备上选到错误分辨率）
-                val maxSize = getMaxJpegSize(facing)
+                val maxSize = getMaxJpegSize(id)
                 LogBuffer.log("I", TAG, "目标分辨率: ${maxSize.width}x${maxSize.height}")
 
                 val resolutionSelector = ResolutionSelector.Builder()
@@ -128,8 +129,14 @@ class CameraXController(
                     .build()
                 imageCapture = capture
 
+                // 按 cameraId 精确选择摄像头
                 val cameraSelector = CameraSelector.Builder()
-                    .requireLensFacing(facing)
+                    .addCameraFilter { cameraInfos ->
+                        cameraInfos.filter { info ->
+                            val camera2Info = Camera2CameraInfo.from(info)
+                            camera2Info.cameraId == id
+                        }
+                    }
                     .build()
 
                 provider.unbindAll()
@@ -143,7 +150,7 @@ class CameraXController(
 
             CaptureResult.Success(bitmap, System.currentTimeMillis())
         } catch (e: Throwable) {
-            LogBuffer.log("E", TAG, "拍摄失败 facing=$facing: ${e.javaClass.simpleName}: ${e.message}")
+            LogBuffer.log("E", TAG, "拍摄失败 id=$id: ${e.javaClass.simpleName}: ${e.message}")
             CaptureResult.Failure("拍摄失败: ${e.message}", e as? Exception ?: RuntimeException(e))
         } finally {
             withContext(NonCancellable + Dispatchers.Main) { release() }
@@ -154,6 +161,9 @@ class CameraXController(
     /**
      * 执行拍照并解码为 mutable Bitmap。
      * ImageCapture.takePicture 是回调 API，转为挂起函数。
+     *
+     * 不做像素旋转：JPEG 的 EXIF 方向信息由 CameraX 写入，系统相册会自动旋转显示。
+     * 这样节省内存（不需要创建第二个 Bitmap），也保证方向一致性。
      */
     private suspend fun takePictureAndDecode(): Bitmap =
         suspendCancellableCoroutine { cont ->
@@ -187,6 +197,9 @@ class CameraXController(
     /**
      * 将 ImageProxy 转为 mutable Bitmap。
      * inMutable=true 保证后续水印模块可直接在 Bitmap 上绘制，零额外内存。
+     *
+     * 注意：不做像素旋转。EXIF 方向信息已包含在 JPEG 中，系统相册自动旋转显示。
+     * 水印画在原始方向上，随整张图一起被系统旋转，用户看到的水印也是正的。
      */
     private fun imageToBitmap(image: ImageProxy): Bitmap {
         val buffer = image.planes[0].buffer
@@ -196,56 +209,51 @@ class CameraXController(
         val options = BitmapFactory.Options().apply {
             inMutable = true
         }
-        val raw = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
             ?: throw RuntimeException("JPEG 解码失败")
-
-        // 旋转校正（和相机传感器方向对齐）
-        val rotationDegrees = image.imageInfo.rotationDegrees
-        return if (rotationDegrees != 0) {
-            val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
-            Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true).also {
-                if (it != raw) raw.recycle()
-            }
-        } else {
-            raw
-        }
     }
 
     /**
-     * 获取指定方向摄像头支持的最高 JPEG 拍照分辨率。
+     * 获取指定摄像头支持的最高 JPEG 拍照分辨率。
      *
      * 为什么不用 CameraX 自带的？
      * - CameraX 默认不选传感器最高分辨率
      * - 需要从底层 Camera2 API 查询真实能力，再回设给 CameraX
      */
-    private fun getMaxJpegSize(facing: Int): Size {
+    private fun getMaxJpegSize(cameraId: String): Size {
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        LogBuffer.log("I", TAG, "getMaxJpegSize: 查找 facing=$facing 的最高分辨率")
-        for (id in cameraManager.cameraIdList) {
-            val chars = cameraManager.getCameraCharacteristics(id)
-            val actualFacing = chars.get(CameraCharacteristics.LENS_FACING)
-            LogBuffer.log("I", TAG, "  camera[$id] facing=$actualFacing (目标=$facing) 匹配=${actualFacing == facing}")
-            if (actualFacing == facing) {
-                val configs = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                val sizes = configs?.getOutputSizes(ImageFormat.JPEG)
-                if (!sizes.isNullOrEmpty()) {
-                    val maxSize = sizes.maxByOrNull { it.width * it.height }!!
-                    LogBuffer.log("I", TAG, "  → 找到最高分辨率: ${maxSize.width}x${maxSize.height}")
-                    return maxSize
-                } else {
-                    LogBuffer.log("I", TAG, "  → 无 JPEG 输出尺寸")
-                }
+        return runCatching {
+            val chars = cameraManager.getCameraCharacteristics(cameraId)
+            val configs = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            val sizes = configs?.getOutputSizes(ImageFormat.JPEG)
+            if (!sizes.isNullOrEmpty()) {
+                sizes.maxByOrNull { it.width * it.height }!!
+            } else {
+                Size(4032, 3024)
             }
+        }.getOrElse {
+            LogBuffer.log("W", TAG, "getMaxJpegSize 失败: ${it.message}，使用兜底分辨率 4032x3024")
+            Size(4032, 3024)
         }
-        LogBuffer.log("W", TAG, "未找到匹配摄像头，使用兜底分辨率 4032x3024")
-        // 兜底：4032x3024（12MP）
-        return Size(4032, 3024)
     }
 
-    private fun otherFacing(facing: Int): Int? = when (facing) {
-        CameraCharacteristics.LENS_FACING_BACK -> CameraCharacteristics.LENS_FACING_FRONT
-        CameraCharacteristics.LENS_FACING_FRONT -> CameraCharacteristics.LENS_FACING_BACK
-        else -> null
+    /**
+     * 找同方向的备用摄像头（主摄像头失败时切换）。
+     * 返回 null 表示没有备用。
+     */
+    private fun findFallbackCameraId(primaryId: String): String? {
+        val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val primaryFacing = runCatching {
+            cameraManager.getCameraCharacteristics(primaryId)
+                .get(CameraCharacteristics.LENS_FACING)
+        }.getOrNull() ?: return null
+
+        return cameraManager.cameraIdList.firstOrNull { id ->
+            id != primaryId && runCatching {
+                cameraManager.getCameraCharacteristics(id)
+                    .get(CameraCharacteristics.LENS_FACING) == primaryFacing
+            }.getOrDefault(false)
+        }
     }
 
     override fun release() {

@@ -2,7 +2,6 @@ package com.timelapse.camera.config
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.hardware.camera2.CameraCharacteristics
 
 /**
  * 存储位置枚举。
@@ -33,8 +32,8 @@ enum class StorageLocation {
 data class CaptureConfig(
     /** 拍摄间隔（秒），远程配置可动态覆盖此值 */
     val intervalSeconds: Int = 3600,
-    /** 摄像头方向：后摄 LENS_FACING_BACK / 前摄 LENS_FACING_FRONT */
-    val cameraFacing: Int = CameraCharacteristics.LENS_FACING_BACK,
+    /** 选中的摄像头 ID，精确到具体镜头（"0", "1", "2"…），而非粗粒度的前/后 */
+    val cameraId: String = "0",
     /** 自定义水印文字，null 表示仅显示时间戳 */
     val watermarkText: String? = null,
     /** 水印是否显示电量 */
@@ -63,7 +62,7 @@ data class CaptureConfig(
     fun save(context: Context) {
         prefs(context).edit().apply {
             putInt(KEY_INTERVAL, intervalSeconds)
-            putInt(KEY_CAMERA_FACING, cameraFacing)
+            putString(KEY_CAMERA_ID, cameraId)
             putString(KEY_WATERMARK, watermarkText)
             putBoolean(KEY_WATERMARK_BATTERY, watermarkShowBattery)
             putBoolean(KEY_WATERMARK_STORAGE, watermarkShowStorage)
@@ -83,7 +82,7 @@ data class CaptureConfig(
     companion object {
         private const val PREFS_NAME = "timelapse_config"
         private const val KEY_INTERVAL = "interval_seconds"
-        private const val KEY_CAMERA_FACING = "camera_facing"
+        private const val KEY_CAMERA_ID = "camera_id"
         private const val KEY_WATERMARK = "watermark_text"
         private const val KEY_WATERMARK_BATTERY = "watermark_battery"
         private const val KEY_WATERMARK_STORAGE = "watermark_storage"
@@ -109,7 +108,7 @@ data class CaptureConfig(
             val prefs = prefs(context)
             return CaptureConfig(
                 intervalSeconds = prefs.getInt(KEY_INTERVAL, 3600),
-                cameraFacing = prefs.getInt(KEY_CAMERA_FACING, CameraCharacteristics.LENS_FACING_BACK),
+                cameraId = prefs.getString(KEY_CAMERA_ID, "0") ?: "0",
                 watermarkText = prefs.getString(KEY_WATERMARK, null),
                 watermarkShowBattery = prefs.getBoolean(KEY_WATERMARK_BATTERY, true),
                 watermarkShowStorage = prefs.getBoolean(KEY_WATERMARK_STORAGE, true),

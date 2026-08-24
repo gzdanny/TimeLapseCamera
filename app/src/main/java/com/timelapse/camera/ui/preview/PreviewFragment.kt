@@ -8,6 +8,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -46,6 +48,7 @@ import kotlinx.coroutines.withContext
  * - 试拍代码复用 CaptureService 的拍摄管线，确保验证的是真实流程
  * - 试拍照片用固定文件名，方便用户在相册中快速定位检查
  */
+@OptIn(ExperimentalCamera2Interop::class)
 class PreviewFragment : Fragment() {
 
     private var _binding: FragmentPreviewBinding? = null
@@ -138,7 +141,12 @@ class PreviewFragment : Fragment() {
                 }
 
             val cameraSelector = CameraSelector.Builder()
-                .requireLensFacing(config.cameraFacing)
+                .addCameraFilter { cameraInfos ->
+                    cameraInfos.filter { info ->
+                        val camera2Info = Camera2CameraInfo.from(info)
+                        camera2Info.cameraId == config.cameraId
+                    }
+                }
                 .build()
 
             try {
@@ -177,7 +185,7 @@ class PreviewFragment : Fragment() {
                 val timestamp = System.currentTimeMillis()
 
                 // ── 2. 拍摄（主线程，CameraX 操作必须在主线程）──
-                val camera = CameraXController(requireContext(), config.cameraFacing)
+                val camera = CameraXController(requireContext(), config.cameraId)
                 val result = camera.capture()
                 LogBuffer.log("I", "TestPhoto",
                     "拍摄完成: ${if (result is CaptureResult.Success) "成功" else "失败"}")

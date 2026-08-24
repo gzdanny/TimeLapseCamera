@@ -81,11 +81,11 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="@string/settings_camera_facing"
+                        android:text="@string/settings_camera_select"
                         android:textSize="15sp" />
 
                     <Spinner
-                        android:id="@+id/spinnerCameraFacing"
+                        android:id="@+id/spinnerCamera"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content" />
                 </LinearLayout>

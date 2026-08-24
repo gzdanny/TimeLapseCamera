@@ -52,7 +52,7 @@
     <!-- 拍摄设置 -->
     <string name="settings_interval">拍摄间隔</string>
     <string name="settings_seconds">秒</string>
-    <string name="settings_camera_facing">摄像头</string>
+    <string name="settings_camera_select">选择摄像头</string>
 
     <!-- 存储设置 -->
     <string name="settings_storage_group">存储设置</string>

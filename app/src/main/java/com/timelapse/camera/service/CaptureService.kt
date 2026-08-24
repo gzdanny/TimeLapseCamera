@@ -168,7 +168,7 @@ class CaptureService : Service() {
                 val timestamp = System.currentTimeMillis()
                 try {
                     LogBuffer.log("I", TAG, "开始拍摄 #${config.captureCount + 1}")
-                    val camera: ICameraController = CameraXController(applicationContext, config.cameraFacing)
+                    val camera: ICameraController = CameraXController(applicationContext, config.cameraId)
                     val result = camera.capture()
                     LogBuffer.log("I", TAG, "拍摄结果: ${if (result is CaptureResult.Success) "成功" else "失败: ${(result as CaptureResult.Failure).message}"}")
 
