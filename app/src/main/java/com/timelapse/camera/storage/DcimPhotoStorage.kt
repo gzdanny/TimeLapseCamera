@@ -94,7 +94,7 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
         values.put(MediaStore.Images.Media.IS_PENDING, 0)
         context.contentResolver.update(uri, values, null, null)
 
-        getFilePathFromUri(uri) ?: uri.toString()
+        return getFilePathFromUri(uri) ?: uri.toString()
     }
 
     private fun saveTestViaFileApi(bitmap: Bitmap, fileName: String): String {
