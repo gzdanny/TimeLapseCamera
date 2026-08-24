@@ -210,7 +210,6 @@ class CaptureService : Service() {
                             config.save(applicationContext)
                             LogBuffer.log("I", TAG, "拍摄完成 #${config.captureCount}")
                         } else {
-                            Log.w(TAG, "黑图占位已保存（拍摄失败）")
                             LogBuffer.log("W", TAG, "拍摄失败，已保存黑图占位")
                         }
                     }.onFailure { e ->
