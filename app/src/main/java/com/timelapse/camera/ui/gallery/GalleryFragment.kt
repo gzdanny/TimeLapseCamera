@@ -9,6 +9,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
+import com.timelapse.camera.R
 import com.timelapse.camera.databinding.FragmentGalleryBinding
 import com.timelapse.camera.databinding.ItemPhotoBinding
 import com.timelapse.camera.config.CaptureConfig
@@ -22,17 +23,14 @@ import java.io.File
 /**
  * 相册页 Fragment —— 网格浏览历史照片。
  *
- * 第一版功能：
- * - Grid 布局（3 列）展示所有照片
+ * 功能：
+ * - Grid 布局（3 列）展示照片
+ * - 分页懒加载：首次加载前 30 张，滚动到底部自动加载更多
  * - Coil 加载缩略图，自动缓存和采样
- * - 按时间倒序（最新的在最前面）
- *
- * 后续可扩展：点击大图、分享、删除、延时连播等。
  *
  * 教学要点：
- * - RecyclerView + Adapter 的标准写法
- * - Coil 图片加载的简洁用法
- * - 后台线程读文件，主线程更新 UI
+ * - RecyclerView 的分页加载模式（offset 游标 + 底部监听）
+ * - 内存友好：不在内存中保留全部照片，只保留当前可视范围附近的批次
  */
 class GalleryFragment : Fragment() {
 
@@ -41,6 +39,10 @@ class GalleryFragment : Fragment() {
 
     private lateinit var storage: IPhotoStorage
     private val adapter = PhotoAdapter()
+
+    /** 分页游标：已加载到 adapter 的照片总数 */
+    private var loadedCount = 0
+    private val PAGE_SIZE = 30
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,16 +61,30 @@ class GalleryFragment : Fragment() {
         binding.recyclerView.layoutManager = GridLayoutManager(context, 3)
         binding.recyclerView.adapter = adapter
 
-        // 首次进入即加载，避免用户切换 Tab 时才看到空屏
-        loadPhotos()
+        // 首次加载前 PAGE_SIZE 张
+        loadNextPage()
+
+        // 滚动到底部时加载更多
+        binding.recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(rv: RecyclerView, dx: Int, dy: Int) {
+                if (dy <= 0) return // 向上滚动不触发
+                val lm = rv.layoutManager as? GridLayoutManager ?: return
+                val lastPos = lm.findLastVisibleItemPosition()
+                if (lastPos != RecyclerView.NO_POSITION && lastPos >= adapter.itemCount - 3) {
+                    loadNextPage()
+                }
+            }
+        })
     }
 
     override fun onResume() {
         super.onResume()
-        // 重建 storage 以感知存储位置变更（onCreate 已保证首次初始化）
-        // GalleryFragment 不持有 config 字段，单次 load + create 已天然一致
+        // 存储位置可能变更，重新创建 storage 并重置分页状态
         storage = PhotoStorageFactory.create(requireContext(), CaptureConfig.load(requireContext()))
-        loadPhotos()
+        loadedCount = 0
+        adapter.setPhotos(emptyList())
+        binding.tvEmpty.visibility = View.GONE
+        loadNextPage()
     }
 
     override fun onDestroyView() {
@@ -76,12 +92,22 @@ class GalleryFragment : Fragment() {
         _binding = null
     }
 
-    private fun loadPhotos() {
+    /**
+     * 加载下一页：从 loadedCount 开始取 PAGE_SIZE 张照片追加到 adapter。
+     * 如果返回数量 < PAGE_SIZE 说明已到末尾。
+     */
+    private fun loadNextPage() {
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-            val photos = storage.getAllPhotos()
+            val photos = storage.getPhotosPaged(loadedCount, PAGE_SIZE)
             withContext(Dispatchers.Main) {
-                adapter.setPhotos(photos)
-                binding.tvEmpty.visibility = if (photos.isEmpty()) View.VISIBLE else View.GONE
+                if (photos.isEmpty()) {
+                    // 无更多照片，显示空状态提示
+                    if (adapter.itemCount == 0) binding.tvEmpty.visibility = View.VISIBLE
+                } else {
+                    adapter.addPhotos(photos)
+                    loadedCount += photos.size
+                    binding.tvEmpty.visibility = View.GONE
+                }
             }
         }
     }
@@ -92,6 +118,14 @@ class GalleryFragment : Fragment() {
 
         private val photos = mutableListOf<File>()
 
+        /** 追加照片（分页加载用），不触发全量重绘 */
+        fun addPhotos(newPhotos: List<File>) {
+            val start = photos.size
+            photos.addAll(newPhotos)
+            notifyItemRangeInserted(start, newPhotos.size)
+        }
+
+        /** 全量替换（用于重置） */
         fun setPhotos(newPhotos: List<File>) {
             photos.clear()
             photos.addAll(newPhotos)

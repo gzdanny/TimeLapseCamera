@@ -77,6 +77,9 @@ class LocalPhotoStorage(
 
     override fun getAllPhotos(): List<File> = allPhotosSortedDesc()
 
+    override fun getPhotosPaged(offset: Int, limit: Int): List<File> =
+        allPhotosSortedDesc().drop(offset).take(limit)
+
     private fun allPhotosSortedDesc(): List<File> =
         baseDir.walkTopDown()
             .filter { it.isFile && it.extension.equals("jpg", ignoreCase = true) }

@@ -46,6 +46,14 @@ interface IPhotoStorage {
     fun getAllPhotos(): List<File>
 
     /**
+     * 分页查询照片（按时间倒序），用于懒加载。
+     * @param offset 跳过前 offset 条（分页游标）
+     * @param limit  每批最多返回条数
+     * @return 本页照片列表（可能少于 limit，表示已到最后）
+     */
+    fun getPhotosPaged(offset: Int, limit: Int): List<File>
+
+    /**
      * FIFO 清理旧照片：剩余空间低于阈值时，按时间从旧到新删除，直到达到安全线。
      *
      * 算法：

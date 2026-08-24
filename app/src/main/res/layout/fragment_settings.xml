@@ -78,11 +78,11 @@
                     android:paddingVertical="14dp">
 
                     <TextView
-                        android:layout_width="0dp"
+                        android:layout_width="36dp"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="@string/settings_camera_select"
-                        android:textSize="15sp" />
+                        android:gravity="center"
+                        android:text="📷"
+                        android:textSize="20sp" />
 
                     <Spinner
                         android:id="@+id/spinnerCamera"
