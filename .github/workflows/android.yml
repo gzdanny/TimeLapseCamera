@@ -27,13 +27,14 @@ jobs:
       with:
         packages: 'platforms;android-34 build-tools;34.0.0'
 
-    - name: Set up Gradle
+    - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v5
-      with:
-        gradle-version: '8.0'
+
+    - name: Make gradlew executable
+      run: chmod +x ./gradlew
 
     - name: Build Debug APK
-      run: gradle assembleDebug --no-daemon --stacktrace
+      run: ./gradlew assembleDebug --no-daemon --stacktrace
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v5
