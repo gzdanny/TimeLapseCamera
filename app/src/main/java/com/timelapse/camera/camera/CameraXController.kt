@@ -23,7 +23,6 @@ import androidx.lifecycle.LifecycleRegistry
 import com.timelapse.camera.model.CaptureResult
 import com.timelapse.camera.util.LogBuffer
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.withContext
@@ -174,7 +173,7 @@ class CameraXController(
             LogBuffer.log("E", TAG, "拍摄失败 id=$id: ${e.javaClass.simpleName}: ${e.message}")
             CaptureResult.Failure("拍摄失败: ${e.message}", e as? Exception ?: RuntimeException(e))
         } finally {
-            withContext(NonCancellable + Dispatchers.Main) { release() }
+            withContext(Dispatchers.Main) { release() }
             LogBuffer.log("I", TAG, "资源释放完成")
         }
     }
