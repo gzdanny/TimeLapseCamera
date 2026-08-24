@@ -86,7 +86,7 @@
     <string name="settings_remote_desc">返回 15-3600 整数，作为下次拍摄间隔（秒）</string>
 
     <!-- 关于 -->
-    <string name="settings_version">版本 1.0.0</string>
+    <string name="settings_version">版本 0.9</string>
 
     <!-- 摄像头方向（SettingsFragment Spinner 使用） -->
     <string name="camera_back">后摄</string>
