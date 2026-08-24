@@ -82,7 +82,8 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
         )
         // 查找已有的 Test.jpg，有则覆盖，无则新建
         val existingUri = findExistingTestUri(collection, fileName)
-        val uri = existingUri ?: context.contentResolver.insert(collection, values)
+        val uri = (existingUri ?: context.contentResolver.insert(collection, values))
+            ?: throw IOException("MediaStore insert 失败")
 
         context.contentResolver.openOutputStream(uri)?.use { out ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
