@@ -137,6 +137,7 @@ class CaptureService : Service() {
         try {
             while (true) {
                 var config = CaptureConfig.load(applicationContext)
+                LogBuffer.log("I", TAG, "循环开始, isRunning=${config.isRunning}")
                 if (!config.isRunning) break
 
                 // ── 0. 检测存储位置是否变更，变更则重建 storage 实例 ──
@@ -219,6 +220,7 @@ class CaptureService : Service() {
                 CaptureScheduler.get(this).scheduleNext(nextDelay)
 
                 // ── 5. 协程等待（主调度，间隔期不持 WakeLock）──
+                LogBuffer.log("I", TAG, "等待 ${nextDelay}s 后进入下一轮")
                 delay(nextDelay * 1000L)
             }
         } finally {

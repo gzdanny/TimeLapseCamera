@@ -169,9 +169,11 @@
                     android:textStyle="bold" />
 
                 <ScrollView
+                    android:id="@+id/svLog"
                     android:layout_width="match_parent"
-                    android:layout_height="180dp"
-                    android:layout_marginTop="8dp">
+                    android:layout_height="200dp"
+                    android:layout_marginTop="8dp"
+                    android:nestedScrollingEnabled="true">
 
                     <TextView
                         android:id="@+id/tvLog"
