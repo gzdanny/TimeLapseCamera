@@ -1,8 +1,11 @@
 package com.timelapse.camera.ui.preview
 
 import android.Manifest
+import android.graphics.Bitmap
 import android.content.pm.PackageManager
 import android.os.Bundle
+import java.io.File
+import java.io.FileOutputStream
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -182,7 +185,20 @@ class PreviewFragment : Fragment() {
                 LogBuffer.log("I", "TestPhoto",
                     "拍摄完成: ${if (result is CaptureResult.Success) "成功" else "失败"}")
 
-                // ── 3. 水印 + 保存（IO 线程，避免阻塞 UI）──
+                // ── 3. 先存一张原图（不加水印），验证高分辨率拍照本身是否正常 ──
+                val rawPath = withContext(Dispatchers.IO) {
+                    if (result is CaptureResult.Success) {
+                        LogBuffer.log("I", "TestPhoto", "保存原图(无水印)")
+                        val rawFileName = "Test_raw.jpg"
+                        val rawFile = File(requireContext().filesDir, rawFileName)
+                        FileOutputStream(rawFile).use { out ->
+                            result.bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                        }
+                        rawFile.absolutePath
+                    } else ""
+                }
+
+                // ── 4. 水印 + 保存（IO 线程，避免阻塞 UI）──
                 LogBuffer.log("I", "TestPhoto", "开始水印处理和保存")
                 val savedPath = withContext(Dispatchers.IO) {
                     val watermarkOptions = WatermarkOptions(

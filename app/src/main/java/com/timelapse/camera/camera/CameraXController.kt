@@ -4,8 +4,11 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.util.Log
+import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -101,9 +104,15 @@ class CameraXController(
                 lifecycleRegistry = LifecycleRegistry(owner).apply { currentState = Lifecycle.State.RESUMED }
                 lifecycleOwner = owner
 
+                // 查所选摄像头的最高 JPEG 分辨率，主动设置给 ImageCapture
+                // （CameraX 默认不选最高，需要手动指定）
+                val maxSize = getMaxJpegSize(facing)
+                LogBuffer.log("I", TAG, "目标分辨率: ${maxSize.width}x${maxSize.height}")
+
                 val capture = ImageCapture.Builder()
-                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                    .setJpegQuality(85)
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                    .setTargetResolution(maxSize)
+                    .setJpegQuality(90)
                     .setTargetRotation(android.view.Surface.ROTATION_0)
                     .build()
                 imageCapture = capture
@@ -189,6 +198,29 @@ class CameraXController(
         } else {
             raw
         }
+    }
+
+    /**
+     * 获取指定方向摄像头支持的最高 JPEG 拍照分辨率。
+     *
+     * 为什么不用 CameraX 自带的？
+     * - CameraX 默认不选传感器最高分辨率
+     * - 需要从底层 Camera2 API 查询真实能力，再回设给 CameraX
+     */
+    private fun getMaxJpegSize(facing: Int): Size {
+        val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        for (id in cameraManager.cameraIdList) {
+            val chars = cameraManager.getCameraCharacteristics(id)
+            if (chars.get(CameraCharacteristics.LENS_FACING) == facing) {
+                val configs = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                val sizes = configs?.getOutputSizes(ImageFormat.JPEG)
+                if (!sizes.isNullOrEmpty()) {
+                    return sizes.maxByOrNull { it.width * it.height }!!
+                }
+            }
+        }
+        // 兜底：4032x3024（12MP）
+        return Size(4032, 3024)
     }
 
     private fun otherFacing(facing: Int): Int? = when (facing) {
