@@ -22,7 +22,7 @@ import com.timelapse.camera.databinding.FragmentPreviewBinding
 import com.timelapse.camera.model.CaptureResult
 import com.timelapse.camera.storage.IPhotoStorage
 import com.timelapse.camera.storage.PhotoStorageFactory
-import com.timelapse.camera.util.BatteryMonitor
+import com.timelapse.camera.util.LogBuffer
 import com.timelapse.camera.watermark.WatermarkOptions
 import com.timelapse.camera.watermark.WatermarkProcessor
 import kotlinx.coroutines.Dispatchers
@@ -168,50 +168,70 @@ class PreviewFragment : Fragment() {
         binding.btnCapture.isEnabled = false
 
         viewLifecycleOwner.lifecycleScope.launch {
-            // ── 1. 释放预览（主线程）──
-            cameraProvider?.unbindAll()
+            try {
+                // ── 1. 释放预览（主线程）──
+                LogBuffer.log("I", "TestPhoto", "试拍开始，释放预览")
+                cameraProvider?.unbindAll()
 
-            val timestamp = System.currentTimeMillis()
+                val timestamp = System.currentTimeMillis()
 
-            // ── 2. 拍摄（主线程，CameraX 操作必须在主线程）──
-            val camera = CameraXController(requireContext(), config.cameraFacing)
-            val result = camera.capture()
+                // ── 2. 拍摄（主线程，CameraX 操作必须在主线程）──
+                val camera = CameraXController(requireContext(), config.cameraFacing)
+                val result = camera.capture()
+                LogBuffer.log("I", "TestPhoto",
+                    "拍摄完成: ${if (result is CaptureResult.Success) "成功" else "失败"}")
 
-            // ── 3. 水印 + 保存（IO 线程，避免阻塞 UI）──
-            val savedPath = withContext(Dispatchers.IO) {
-                val watermarkOptions = WatermarkOptions(
-                    customText = config.watermarkText,
-                    showBattery = config.watermarkShowBattery,
-                    showStorage = config.watermarkShowStorage,
-                    showTemperature = config.watermarkShowTemperature,
-                    batteryPercent = BatteryMonitor.getBatteryPercent(requireContext()),
-                    storageRemainingGb = BatteryMonitor.getStorageRemainingGb(storage.getPhotoDir()),
-                    temperatureCelsius = BatteryMonitor.getBatteryTemperature(requireContext())
-                )
+                // ── 3. 水印 + 保存（IO 线程，避免阻塞 UI）──
+                LogBuffer.log("I", "TestPhoto", "开始水印处理和保存")
+                val savedPath = withContext(Dispatchers.IO) {
+                    val watermarkOptions = WatermarkOptions(
+                        customText = config.watermarkText,
+                        showBattery = config.watermarkShowBattery,
+                        showStorage = config.watermarkShowStorage,
+                        showTemperature = config.watermarkShowTemperature,
+                        batteryPercent = BatteryMonitor.getBatteryPercent(requireContext()),
+                        storageRemainingGb = BatteryMonitor.getStorageRemainingGb(storage.getPhotoDir()),
+                        temperatureCelsius = BatteryMonitor.getBatteryTemperature(requireContext())
+                    )
 
-                val bitmapToSave = when (result) {
-                    is CaptureResult.Success -> {
-                        watermarkProcessor.apply(result.bitmap, result.timestamp, watermarkOptions)
+                    val bitmapToSave = when (result) {
+                        is CaptureResult.Success -> {
+                            LogBuffer.log("I", "TestPhoto",
+                                "原始照片尺寸: ${result.bitmap.width}x${result.bitmap.height}")
+                            watermarkProcessor.apply(result.bitmap, result.timestamp, watermarkOptions)
+                        }
+                        is CaptureResult.Failure -> {
+                            watermarkProcessor.createErrorBitmap(timestamp)
+                        }
                     }
-                    is CaptureResult.Failure -> {
-                        watermarkProcessor.createErrorBitmap(timestamp)
-                    }
+
+                    val path = storage.saveTestPhoto(bitmapToSave)
+                    LogBuffer.log("I", "TestPhoto", "保存完成: $path")
+                    path
                 }
 
-                storage.saveTestPhoto(bitmapToSave)
-            }
+                // ── 4. 重新绑定预览 + 显示结果（主线程）──
+                val b = _binding ?: return@launch
+                b.btnCapture.isEnabled = true
+                startCamera()
 
-            // ── 4. 重新绑定预览 + 显示结果（主线程）──
-            val b = _binding ?: return@launch
-            b.btnCapture.isEnabled = true
-            startCamera()
-
-            b.cardTestResult.visibility = View.VISIBLE
-            b.ivTestResult.load(savedPath)
-            b.tvTestResult.text = if (result is CaptureResult.Success) {
-                getString(R.string.preview_test_saved)
-            } else {
-                getString(R.string.preview_test_fail)
+                b.cardTestResult.visibility = View.VISIBLE
+                b.ivTestResult.load(savedPath)
+                b.tvTestResult.text = if (result is CaptureResult.Success) {
+                    getString(R.string.preview_test_saved)
+                } else {
+                    getString(R.string.preview_test_fail)
+                }
+                LogBuffer.log("I", "TestPhoto", "试拍流程全部完成")
+            } catch (e: Throwable) {
+                LogBuffer.log("E", "TestPhoto", "试拍异常: ${e.javaClass.simpleName}: ${e.message}")
+                e.printStackTrace()
+                val b = _binding
+                if (b != null) {
+                    b.btnCapture.isEnabled = true
+                    b.cardTestResult.visibility = View.VISIBLE
+                    b.tvTestResult.text = "试拍失败: ${e.javaClass.simpleName}: ${e.message}"
+                }
             }
         }
     }

@@ -122,9 +122,9 @@ class CameraXController(
             }
 
             CaptureResult.Success(bitmap, System.currentTimeMillis())
-        } catch (e: Exception) {
-            LogBuffer.log("E", TAG, "拍摄失败 facing=$facing: ${e.message}")
-            CaptureResult.Failure("拍摄失败: ${e.message}", e)
+        } catch (e: Throwable) {
+            LogBuffer.log("E", TAG, "拍摄失败 facing=$facing: ${e.javaClass.simpleName}: ${e.message}")
+            CaptureResult.Failure("拍摄失败: ${e.message}", e as? Exception ?: RuntimeException(e))
         } finally {
             withContext(NonCancellable + Dispatchers.Main) { release() }
             LogBuffer.log("I", TAG, "资源释放完成")

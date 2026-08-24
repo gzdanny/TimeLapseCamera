@@ -86,27 +86,12 @@ object CameraEnumerator {
                 val info = CameraInfo(id, facing, facingName, sensorSize, focalLengths, jpegSizes)
                 result.add(info)
 
-                // 打印概要
+                // 打印概要（一行搞定，不刷屏）
+                val sensorInfo = sensorSize?.let { "${it.width}x${it.height}" } ?: "未知"
                 LogBuffer.log(
                     "I", TAG,
-                    "[$id] $facingName | ${info.megapixels} | 焦距: ${info.focalLengthText}"
+                    "[$id] $facingName | ${info.megapixels} | 传感器: $sensorInfo | 焦距: ${info.focalLengthText}"
                 )
-
-                // 打印传感器尺寸
-                if (sensorSize != null) {
-                    LogBuffer.log("I", TAG, "  传感器: ${sensorSize.width}x${sensorSize.height}")
-                }
-
-                // 打印支持的 JPEG 分辨率（前 5 个最高的）
-                val topSizes = jpegSizes.take(5)
-                LogBuffer.log("I", TAG, "  最高 ${topSizes.size} 个拍照分辨率:")
-                topSizes.forEach { size ->
-                    val mp = (size.width * size.height) / 1_000_000f
-                    LogBuffer.log("I", TAG, "    ${size.width}x${size.height} (%.1fMP)".format(mp))
-                }
-                if (jpegSizes.size > 5) {
-                    LogBuffer.log("I", TAG, "    … 还有 ${jpegSizes.size - 5} 个更低分辨率")
-                }
             }.onFailure { e ->
                 LogBuffer.log("E", TAG, "读取摄像头 $id 信息失败: ${e.message}")
             }
