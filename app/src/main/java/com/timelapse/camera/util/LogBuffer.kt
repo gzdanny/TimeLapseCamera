@@ -37,10 +37,13 @@ object LogBuffer {
         if (initialized) return
         synchronized(logs) {
             if (initialized) return
-            logFile = File(context.filesDir, "logbuffer.txt")
-            logFile?.let { file ->
-                if (file.exists()) {
-                    file.readLines().takeLast(MAX_SIZE).forEach { logs.add(it) }
+            // 写在外部文件目录，用户可通过文件管理器访问（无需 Root）
+            val dir = context.getExternalFilesDir(null)
+                ?: throw IllegalStateException("无法获取外部文件目录")
+            logFile = File(dir, "timelapse_log.txt")
+            if (logFile!!.exists()) {
+                runCatching {
+                    logFile!!.readLines().takeLast(MAX_SIZE).forEach { logs.add(it) }
                 }
             }
             initialized = true
