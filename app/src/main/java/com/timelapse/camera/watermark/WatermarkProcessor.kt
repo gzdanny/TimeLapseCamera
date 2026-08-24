@@ -100,10 +100,10 @@ class WatermarkProcessor {
     private fun buildStatusText(options: WatermarkOptions): String {
         val parts = mutableListOf<String>()
         if (options.showBattery) {
-            parts.add("${batteryIcon(options.batteryPercent)} ${options.batteryPercent}%")
+            parts.add("🔋 ${options.batteryPercent}%")
         }
         if (options.showStorage) {
-            parts.add("💾 %.1fGB".format(Locale.US, options.storageRemainingGb))
+            parts.add("💿 %.1fGB".format(Locale.US, options.storageRemainingGb))
         }
         if (options.showTemperature) {
             parts.add("🌡 %.0f°C".format(Locale.US, options.temperatureCelsius))
@@ -119,14 +119,6 @@ class WatermarkProcessor {
     private fun formatTime(timestamp: Long): String =
         SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
             .format(Date(timestamp))
-
-    /** 根据电量百分比返回不同的电池图标，直观展示电量状态 */
-    private fun batteryIcon(percent: Int): String = when {
-        percent >= 100 -> "🔋"
-        percent >= 80 -> "🟢"
-        percent >= 30 -> "🔌"
-        else -> "🪫"
-    }
 
     // ────────────────── 绘制 ──────────────────
 

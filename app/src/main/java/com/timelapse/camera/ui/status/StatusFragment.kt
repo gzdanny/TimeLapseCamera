@@ -28,11 +28,11 @@ import java.util.Locale
  * 核心信息：
  * - 运行状态 + 统计（拍摄数量、电量、存储、温度）
  * - 开始/停止按钮
- * - 运行日志（实时滚动更新）
+ * - 运行日志（实时滚动更新，不自动滚底）
  *
  * 设计要点：
- * - 页面进入时加载一次完整状态，后续每秒只刷新日志（自动滚动到底部）
- * - 倒计时由系统通知栏的 Chronometer 渲染，UI 不重复计算
+ * - 页面进入时加载一次完整状态，后续每秒刷新全部信息（倒计时、统计、日志）
+ * - 倒计时基于 lastCaptureTime 推算，每轮从磁盘读取最新 config
  * - 用 lifecycleScope，页面不可见时自动停止刷新
  */
 class StatusFragment : Fragment() {
@@ -68,12 +68,12 @@ class StatusFragment : Fragment() {
         super.onResume()
         reloadFromDisk()
         updateUI()
-        startLogRefresh()
+        startStatusRefresh()
     }
 
     override fun onPause() {
         super.onPause()
-        stopLogRefresh()
+        stopStatusRefresh()
     }
 
     override fun onDestroyView() {
@@ -89,22 +89,53 @@ class StatusFragment : Fragment() {
         storage = PhotoStorageFactory.create(requireContext(), config)
     }
 
-    // ──────────── 日志刷新 ────────────
+    // ──────────── 主页状态刷新 ────────────
 
-    private fun startLogRefresh() {
-        stopLogRefresh()
+    private fun startStatusRefresh() {
+        stopStatusRefresh()
         refreshJob = viewLifecycleOwner.lifecycleScope.launch {
             while (true) {
                 delay(1000)
-                // 日志每 1 秒滚动到底部（仅更新视图，不重新读文件）
+                // 每秒从磁盘重新加载 config，保证所有动态数据都最新
+                val curConfig = CaptureConfig.load(requireContext())
+                val curStorage = PhotoStorageFactory.create(requireContext(), curConfig)
+                val now = System.currentTimeMillis()
+
+                // 倒计时
+                val remaining = curConfig.lastCaptureTime.let { lastTime ->
+                    if (lastTime > 0) (lastTime + curConfig.intervalSeconds * 1000L).coerceAtLeast(now)
+                    else now + curConfig.intervalSeconds * 1000L
+                } - now
+                binding.tvCountdown.text = if (remaining > 0) formatDuration(remaining) else "--:--:--"
+
+                // 运行状态
+                val isRunning = curConfig.isRunning
+                binding.tvStatus.text = if (isRunning) getString(R.string.status_running)
+                else getString(R.string.status_stopped)
+                binding.tvStatus.setTextColor(
+                    if (isRunning) resources.getColor(android.R.color.holo_green_dark)
+                    else resources.getColor(android.R.color.darker_gray)
+                )
+                binding.btnToggle.text = if (isRunning) getString(R.string.btn_stop)
+                else getString(R.string.btn_start)
+
+                // 统计信息
+                binding.tvCaptureCount.text = getString(R.string.status_count_format, curConfig.captureCount)
+                val battery = BatteryMonitor.getBatteryPercent(requireContext())
+                val storageGb = BatteryMonitor.getStorageRemainingGb(curStorage.getPhotoDir())
+                val temp = BatteryMonitor.getBatteryTemperature(requireContext())
+                binding.tvBattery.text = getString(R.string.status_battery_format, battery)
+                binding.tvStorage.text = getString(R.string.status_storage_format, storageGb)
+                binding.tvTemperature.text = getString(R.string.status_temperature_format, temp)
+
+                // 日志（不自动滚底，用户可自由滚动查阅）
                 binding.tvLog.text = LogBuffer.getFormattedLogs()
                     .ifEmpty { getString(R.string.status_log_empty) }
-                binding.svLog.post { binding.svLog.fullScroll(View.FOCUS_DOWN) }
             }
         }
     }
 
-    private fun stopLogRefresh() {
+    private fun stopStatusRefresh() {
         refreshJob?.cancel()
         refreshJob = null
     }
