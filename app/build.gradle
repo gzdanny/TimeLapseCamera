@@ -44,8 +44,8 @@ dependencies {
 
     // 协程: 异步拍摄流程
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
-    // 协程 + Future 互操作（给 ListenableFuture 扩展 await() 挂起函数）
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3'
+    // 协程 + ListenableFuture 互操作（ProcessCameraProvider.getInstance() 返回 ListenableFuture）
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.7.3'
 
     // Fragment: 底部导航的 4 个页面
     implementation 'androidx.fragment:fragment-ktx:1.6.2'

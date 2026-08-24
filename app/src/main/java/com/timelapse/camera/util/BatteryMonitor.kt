@@ -1,6 +1,8 @@
 package com.timelapse.camera.util
 
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.StatFs
 import java.io.File
@@ -19,11 +21,19 @@ object BatteryMonitor {
         return bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
     }
 
-    /** 读取电池温度（摄氏度）。BatteryManager 返回的是 0.1°C 单位，需除以 10。 */
+    /**
+     * 读取电池温度（摄氏度）。
+     *
+     * Android 没有 BATTERY_PROPERTY_TEMPERATURE 常量，温度只能通过
+     * ACTION_BATTERY_CHANGED 这个 sticky broadcast intent 读取。
+     * 返回值单位为 0.1°C，需除以 10。
+     */
     fun getBatteryTemperature(context: Context): Float {
-        val bm = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
-        // BATTERY_PROPERTY_TEMPERATURE 在 API 26+ 可用，返回值单位为 0.1°C
-        val raw = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_TEMPERATURE)
+        val intent = context.registerReceiver(
+            null,
+            IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+        )
+        val raw = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
         return raw / 10f
     }
 

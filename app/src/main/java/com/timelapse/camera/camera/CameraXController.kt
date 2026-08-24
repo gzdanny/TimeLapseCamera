@@ -17,7 +17,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import com.timelapse.camera.model.CaptureResult
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.guava.await
 import kotlin.coroutines.resume
 
 /**

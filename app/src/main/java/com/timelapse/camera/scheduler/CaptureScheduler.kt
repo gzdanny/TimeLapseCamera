@@ -46,6 +46,10 @@ class CaptureScheduler private constructor(private val context: Context) {
     fun scheduleNext(delaySeconds: Int) {
         val triggerAt = System.currentTimeMillis() + delaySeconds * 1000L
         val pendingIntent = buildPendingIntent()
+        if (pendingIntent == null) {
+            Log.e(TAG, "创建 PendingIntent 失败，无法安排拍摄")
+            return
+        }
 
         try {
             // 优先使用精确闹钟（可在 Doze 下唤醒）
