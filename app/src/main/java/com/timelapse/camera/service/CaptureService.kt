@@ -94,7 +94,6 @@ class CaptureService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                Log.i(TAG, "收到停止指令")
                 LogBuffer.log("I", TAG, "收到停止指令")
                 CaptureConfig.load(applicationContext)
                     .copy(isRunning = false)
@@ -193,7 +192,7 @@ class CaptureService : Service() {
                             }
                         }
                         is CaptureResult.Failure -> {
-                            Log.e(TAG, "拍摄失败: ${result.message}", result.cause)
+                            LogBuffer.log("E", TAG, "拍摄失败: ${result.message}")
                             watermarkProcessor.createErrorBitmap(timestamp)
                         }
                     }
@@ -209,14 +208,12 @@ class CaptureService : Service() {
                                 lastCaptureTime = timestamp
                             )
                             config.save(applicationContext)
-                            Log.i(TAG, "拍摄完成 #${config.captureCount}")
                             LogBuffer.log("I", TAG, "拍摄完成 #${config.captureCount}")
                         } else {
                             Log.w(TAG, "黑图占位已保存（拍摄失败）")
                             LogBuffer.log("W", TAG, "拍摄失败，已保存黑图占位")
                         }
                     }.onFailure { e ->
-                        Log.e(TAG, "写入磁盘失败", e)
                         LogBuffer.log("E", TAG, "写入磁盘失败: ${e.message}")
                         bitmapToSave.recycle()
                     }
