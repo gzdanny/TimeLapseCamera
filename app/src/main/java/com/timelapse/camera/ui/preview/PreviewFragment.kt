@@ -22,6 +22,7 @@ import com.timelapse.camera.databinding.FragmentPreviewBinding
 import com.timelapse.camera.model.CaptureResult
 import com.timelapse.camera.storage.IPhotoStorage
 import com.timelapse.camera.storage.PhotoStorageFactory
+import com.timelapse.camera.util.BatteryMonitor
 import com.timelapse.camera.util.LogBuffer
 import com.timelapse.camera.watermark.WatermarkOptions
 import com.timelapse.camera.watermark.WatermarkProcessor
