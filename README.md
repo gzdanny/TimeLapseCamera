@@ -77,6 +77,16 @@
 ## 目录结构
 
 ```
+├── .github/workflows/
+│   └── android.yml              # GitHub Actions: 云端编译 + 发布 APK
+├── gradle/wrapper/
+│   ├── gradle-wrapper.jar       # Gradle Wrapper 二进制
+│   └── gradle-wrapper.properties # 指定 Gradle 版本（8.0）
+├── gradlew                      # Unix 构建脚本
+├── gradlew.bat                  # Windows 构建脚本
+├── app/build.gradle             # AGP 配置 + 依赖声明
+├── build.gradle                 # 根构建文件（AGP/Kotlin 插件版本）
+│
 app/src/main/java/com/timelapse/camera/
 ├── MainActivity.kt              # 主界面：底部导航 + Fragment 切换
 │
@@ -455,15 +465,45 @@ onResume()         ← 刷新数据（reloadFromDisk），但属性已在 onCrea
 ### 用命令行
 
 ```bash
-# 生成 Gradle Wrapper（首次）
-gradle wrapper
-
 # 构建 Debug APK
 ./gradlew assembleDebug
 
 # 安装到已连接的设备
 ./gradlew installDebug
 ```
+
+### 用 GitHub Actions 云端编译（无需本地环境）
+
+项目配置了 GitHub Actions workflow（`.github/workflows/android.yml`），push 到 `main` 分支后自动编译 Debug APK。
+
+**适用场景**：学生在瘦客户端（Chromebook、iPad）上开发，本地没有 Android Studio 和 SDK。
+
+**工作流设计**：
+
+| 触发条件 | 执行内容 | 产物 |
+|---------|---------|------|
+| push 到 main/master | 编译 Debug APK | 30 天临时 artifact |
+| push tag `v*` | 编译 + 创建 GitHub Release | 永久 Release 附带 APK |
+
+**关键技术决策**：
+
+1. **用 Gradle Wrapper 而非强制安装 Gradle** — `./gradlew` 由 `gradle-wrapper.properties` 控制版本，CI 和本地一致
+2. **setup-gradle@v5 而非 v6** — v6 把缓存组件改为闭源专有许可，v5 是最后一个 MIT 许可版本
+3. **不指定 `gradle-version`** — 让项目自己的 Wrapper 决定，避免与 AGP 版本不匹配
+
+**CI 调试注意事项**：
+
+1. **失败时先看详细日志**：进入 Actions 页面 → 点失败的 run → 展开失败的 step → 读完整错误
+2. **区分错误类型**：环境问题（改 workflow）vs 编译问题（改代码）vs SDK 问题（对齐 compileSdk）
+3. **编译错误一次修完**：读全部错误，不要修一个 push 一次
+4. **找根因不做表面修复**：类型不匹配 → 查继承层次；API 不存在 → 查官方文档
+5. **warning 也要修**：Node.js 废弃警告未来会变成 error
+
+> 本项目 CI 配置过程中踩过的坑（7 轮失败 → 成功）已记录在 SKILL.md 第 10 节，可作为教学案例。
+
+**下载已编译的 APK**：
+
+到 [Releases 页面](https://github.com/gzdanny/TimeLapseCamera/releases) 下载最新版本的 APK。
 
 ## 使用指南
 

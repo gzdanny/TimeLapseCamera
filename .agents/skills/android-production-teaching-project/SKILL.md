@@ -25,6 +25,7 @@ description: "Build high-quality, genuinely useful Android applications as compl
 7. UI 重构      → 功能分区、用户体验
 8. 多轮审查     → 每轮关注不同层次
 9. 发布审计     → 废弃资源清理、文档同步
+10. 持续集成     → GitHub Actions 云端编译、发布
 ```
 
 **调研是贯穿全程的习惯**：不只在做架构设计时查一次，而是每当遇到"该用 A 还是 B"、"这个 API 在新版本还推荐吗"、"有没有更现代的写法"时，都先查文档再写代码。
@@ -176,7 +177,7 @@ Android 最佳实践迭代很快，凭记忆写代码几乎一定会写出过时
 | Camera2 vs CameraX | Google 推荐、代码量、预览复杂度 | CameraX | 代码少 40%、Preview 用例简化预览 |
 | AlarmManager alone vs 前台服务 | 国产 ROM 杀进程策略 | 前台服务 + AlarmManager 备份 | 单一 AlarmManager 在国产 ROM 不可靠 |
 | File API vs MediaStore (DCIM) | Android 11+ Scoped Storage | API 29+ MediaStore / API 26-28 File | 最佳实践，无需额外权限 |
-| `.get()` vs `.await()` | 协程 + ListenableFuture 互操作 | `.await()` + `kotlinx-coroutines-play-services` | 挂起函数不应阻塞线程 |
+| `.get()` vs `.await()` | 协程 + ListenableFuture 互操作 | `.await()` + `kotlinx-coroutines-guava` | `ProcessCameraProvider.getInstance()` 返回 `ListenableFuture`，`guava` 库提供 `await()` 扩展；`play-services` 只支持 `Task<T>`，类型不匹配 |
 | `requestPermissions` vs ActivityResultContracts | AndroidX 推荐方式 | ActivityResultContracts | 官方推荐，无需手动管理 requestCode |
 
 ## 4. 最小实现（v1）
@@ -317,6 +318,33 @@ Fragment 是观察者，不是控制器。
 - [ ] lateinit 在最早安全位置初始化
 - [ ] 用户输入有校验
 - [ ] 失败路径有兜底不崩溃
+- [ ] 每个方法调用的参数类型与变量声明类型匹配（含可空性）
+- [ ] 每个引用的 API 常量/方法在目标 SDK 版本确实存在
+- [ ] 传入接口参数的对象确实实现了该接口（检查继承层次，不是假设）
+
+### 瘦客户端环境下的类型审查：独立审查就是编译器
+
+在瘦客户端（Chromebook、iPad）或无 Android Studio 的环境下，学生无法本地编译。此时**独立审查 agent 是唯一的编译器**——审查必须覆盖编译器会检查的类型问题：
+
+| 编译器检查项 | 审查 agent 如何替代 |
+|-------------|-------------------|
+| 类型不匹配 | 查方法签名的参数类型，与传入变量声明类型对比 |
+| 可空类型传给非空参数 | 检查变量是否有 `?`，传给的方法参数是否允许 null |
+| API 常量不存在 | 查官方文档确认常量/方法在目标 SDK 中存在 |
+| 类不实现接口 | 查类继承层次，确认满足方法签名要求 |
+| import 的扩展函数适用类型错误 | 查扩展函数的 receiver 类型，与调用对象类型对比 |
+
+**本项目真实案例**：5 个编译错误全部在 push 前通过类型审查就能发现，但当时跳过了独立审查直接 push，导致 6 轮 CI 构建才全部修复。
+
+| 错误 | 编译器报错 | 审查 agent 如何提前发现 |
+|------|-----------|----------------------|
+| `tasks.await()` 用于 `ListenableFuture` | Unresolved reference | 查 `getInstance()` 返回 `ListenableFuture`，查 `tasks.await` 适用于 `Task<T>`，类型不匹配 |
+| `PendingIntent?` 传给非空参数 | Type mismatch | `buildPendingIntent()` 返回 `PendingIntent?`，方法要求 `PendingIntent`，有 `?` |
+| `BATTERY_PROPERTY_TEMPERATURE` 不存在 | Unresolved reference | 查 `BatteryManager` 文档，常量列表中无此项 |
+| `ImageCapture?` 传给 `bindToLifecycle` | None of the following functions | 变量声明 `var ImageCapture?`，方法参数要求非空 `UseCase` |
+| `LifecycleRegistry` 不是 `LifecycleOwner` | None of the following functions | 查类层次：`LifecycleRegistry` 继承 `Lifecycle`，不是 `LifecycleOwner` |
+
+**结论：编译错误不需要编译才能发现。** 查 API 文档 + 检查类型声明 = 覆盖编译器的类型检查。在无编译环境时，这一步是必须的，不是可选的。
 
 ## 9. 文档编写
 
@@ -355,6 +383,112 @@ Fragment 是观察者，不是控制器。
 
 **改代码的那次 Edit/Write，同时改对应的文档。** 不要攒着。文档过时都是在"改了代码没改注释"时发生的。
 
+## 10. 持续集成与发布
+
+### 为什么用 GitHub Actions 云端编译
+
+教学项目可能限定学生在瘦客户端（Chromebook、iPad）上开发，本地没有 Android Studio 和 SDK。GitHub Actions 让学生在浏览器里写代码，push 后云端自动编译并产出 APK，实现 idea → product 的完整闭环。
+
+### 配置前检查清单
+
+写 workflow 前必须确认：
+
+| 检查项 | 怎么查 | 不查的后果 |
+|--------|--------|-----------|
+| Gradle Wrapper 文件是否存在 | `ls gradlew gradlew.bat gradle/wrapper/gradle-wrapper.jar` | 用 `./gradlew` 会找不到文件 |
+| `gradle-wrapper.properties` 指定的 Gradle 版本 | 读 `distributionUrl` | 不知道 Wrapper 会装哪个版本 |
+| `build.gradle` 的 AGP 版本 | 读根 `build.gradle` 的 `plugins` 块 | AGP 和 Gradle 版本不兼容 |
+| `app/build.gradle` 的 `compileSdk` | 读 `android` 块 | SDK packages 装错版本 |
+| 每个 GitHub Action 的最新版本 | 查 actions 的 GitHub Releases 页面 | 用了废弃的 Node.js 20 版本 |
+
+### Workflow 核心原则
+
+**用 Gradle Wrapper，不强制安装 Gradle 版本。**
+
+```yaml
+# ❌ 不要这样——绕过了项目的 Wrapper，版本不受控
+- name: Set up Gradle
+  uses: gradle/actions/setup-gradle@v5
+  with:
+    gradle-version: '8.0'    # 强制指定版本，可能与 AGP 不匹配
+
+- run: gradle assembleDebug   # 用系统安装的 gradle，不是 Wrapper
+
+# ✅ 正确——让项目的 gradle-wrapper.properties 决定版本
+- name: Setup Gradle
+  uses: gradle/actions/setup-gradle@v5    # 不带 gradle-version，只提供缓存
+
+- name: Make gradlew executable
+  run: chmod +x ./gradlew                   # Linux CI 需要执行权限
+
+- run: ./gradlew assembleDebug              # 用 Wrapper，版本由项目控制
+```
+
+### 版本选择：查文档，不凭记忆
+
+GitHub Actions 的 action 版本迭代很快。**凭记忆写版本号几乎一定会写出废弃版本。**
+
+| Action | 凭记忆可能写的 | 查文档发现应该用的 | 废弃原因 |
+|--------|-------------|----------------|---------|
+| `actions/checkout` | @v4 | @v5 或更高 | v4 用 Node.js 20，2025-09 废弃 |
+| `actions/setup-java` | @v4 | @v5 或更高 | 同上 |
+| `actions/upload-artifact` | @v5 | @v6 或更高 | v5 用 Node.js 20 |
+| `gradle/actions/setup-gradle` | @v4 | @v5 | v4 用 Node.js 20 |
+
+**查的方法**：到该 action 的 GitHub 仓库 → Releases 页面 → 看最新版本号和 changelog。
+
+**setup-gradle 的版本选择**：v6 把缓存组件改为闭源专有许可，v5 是最后一个 MIT 许可版本。开源项目优先选 v5，不选 v6。
+
+### CI 失败时的调试 SOP
+
+```
+1. 立即定位详细日志
+   └── 进入 https://github.com/{owner}/{repo}/actions
+       → 点失败的 run → 展开失败的 step
+       → 读完整错误信息，不要只看摘要
+
+2. 分类错误
+   ├── 环境问题（Node.js 废弃、缓存 400）→ 改 workflow
+   ├── 编译问题（类型不匹配、API 不存在）→ 回本地改代码，不在 CI 上试错
+   └── SDK 问题（platforms 不匹配）→ 对齐 compileSdk 和 packages
+
+3. 编译错误：读全部错误，一次修完
+   ├── 不只看第一个错误就 push
+   ├── 同类问题一起查（如多个 nullable 参数问题）
+   └── 找根因，不做表面修复
+       例：报 ImageCapture? 不匹配 → 不只加 !!，要看变量为什么是 nullable
+       例：报 bindToLifecycle 类型不匹配 → 不只改参数，要查 LifecycleRegistry 的继承层次
+
+4. 修复后先自查再 push
+   └── 按"瘦客户端类型审查"清单检查一遍
+```
+
+### 本项目的 CI 踩坑全记录
+
+本项目从配置 CI 到首次成功构建，经历了 7 轮失败。每一轮的教训：
+
+| 轮次 | 失败原因 | 教训 |
+|------|---------|------|
+| 1 | 多个 action 用 Node.js 20 废弃版本 | 配置前查每个 action 的最新版本，不凭记忆 |
+| 2 | setup-gradle@v4 仍用 Node 20 | 升级要逐个验证，不能遗漏 |
+| 3 | 5 个 Kotlin 编译错误 | push 前必须做独立类型审查 |
+| 4 | 只修了报错行，漏了同类型错误 | 读全部错误，一次修完 |
+| 5 | 表面修复（加 val），没发现根因（LifecycleRegistry 不是 LifecycleOwner） | 找根因，不做表面修复 |
+| 6 | 漏看 warning（upload-artifact@v5 仍用 Node 20） | warning 也要修，不只看 error |
+
+### 发布策略
+
+```yaml
+# 每次 push 到 main → 编译 + 上传 artifact（30 天临时）
+# push tag v* → 编译 + 创建永久 GitHub Release
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+```
+
+**为什么不每次 push 都 release**：开发过程中有很多中间版本，不是每个都需要对外发布。tag 是明确的发布信号。
+
 ## 教学知识点覆盖清单
 
 一个好的教学项目应该覆盖以下知识点（按重要性排序）：
@@ -382,6 +516,7 @@ Fragment 是观察者，不是控制器。
 - [ ] 远程配置（HTTP 请求 + 超时处理）
 - [ ] 电池/存储/温度监控
 - [ ] ProGuard/R8 规则
+- [ ] GitHub Actions CI/CD（云端编译 + 自动发布）
 
 ## 常见误区
 
@@ -399,3 +534,10 @@ Fragment 是观察者，不是控制器。
 | 调研只做一次 | 贯穿全程，每个"该用 A 还是 B"的时刻都查 |
 | 改几行就 git commit | 以功能点验收通过为提交粒度，不提交未通过审查的代码 |
 | 开发者自己审自己 | 另开只读审查 agent，避免自圆其说 |
+| 凭记忆写 CI workflow 版本号 | 查每个 action 的 GitHub Releases 页面，确认最新版本 |
+| 没审查就 push 到 CI | 先做独立类型审查（查 API + 查类型），再 push |
+| CI 失败只看第一个错误 | 读全部错误，同类问题一次修完 |
+| 表面修复不改根因 | 查类型继承层次和 API 文档，找到真正的类型不匹配原因 |
+| 用 CI 当编译器反复试错 | CI 是验证手段，不是调试工具；编译错误回本地改 |
+| workflow 里强制 gradle-version | 用 Gradle Wrapper（`./gradlew`），让项目控制版本 |
+| 只看 error 忽略 warning | warning 也要修（如 Node.js 废弃警告会变成 error） |
