@@ -54,7 +54,11 @@ data class CaptureConfig(
     /** 上次成功拍摄的时间戳（用于 UI 推算真实倒计时） */
     val lastCaptureTime: Long = 0,
     /** 照片存储位置 */
-    val storageLocation: StorageLocation = StorageLocation.APP_PRIVATE
+    val storageLocation: StorageLocation = StorageLocation.APP_PRIVATE,
+    /** FIFO 清理阈值（GB）：剩余空间低于此值时触发清理 */
+    val storageThresholdGb: Float = 1.0f,
+    /** FIFO 清理安全线（GB）：清理到此值停止 */
+    val storageSafeLineGb: Float = 2.0f
 ) {
     fun save(context: Context) {
         prefs(context).edit().apply {
@@ -70,6 +74,8 @@ data class CaptureConfig(
             putInt(KEY_LAST_REMOTE_INTERVAL, lastRemoteInterval)
             putLong(KEY_LAST_CAPTURE_TIME, lastCaptureTime)
             putString(KEY_STORAGE_LOCATION, storageLocation.name)
+            putFloat(KEY_STORAGE_THRESHOLD, storageThresholdGb)
+            putFloat(KEY_STORAGE_SAFE_LINE, storageSafeLineGb)
             apply()
         }
     }
@@ -88,6 +94,8 @@ data class CaptureConfig(
         private const val KEY_LAST_REMOTE_INTERVAL = "last_remote_interval"
         private const val KEY_LAST_CAPTURE_TIME = "last_capture_time"
         private const val KEY_STORAGE_LOCATION = "storage_location"
+        private const val KEY_STORAGE_THRESHOLD = "storage_threshold_gb"
+        private const val KEY_STORAGE_SAFE_LINE = "storage_safe_line_gb"
 
         @Volatile private var prefsInstance: SharedPreferences? = null
 
@@ -111,7 +119,9 @@ data class CaptureConfig(
                 captureCount = prefs.getInt(KEY_CAPTURE_COUNT, 0),
                 lastRemoteInterval = prefs.getInt(KEY_LAST_REMOTE_INTERVAL, 0),
                 lastCaptureTime = prefs.getLong(KEY_LAST_CAPTURE_TIME, 0),
-                storageLocation = StorageLocation.fromName(prefs.getString(KEY_STORAGE_LOCATION, null))
+                storageLocation = StorageLocation.fromName(prefs.getString(KEY_STORAGE_LOCATION, null)),
+                storageThresholdGb = prefs.getFloat(KEY_STORAGE_THRESHOLD, 1.0f),
+                storageSafeLineGb = prefs.getFloat(KEY_STORAGE_SAFE_LINE, 2.0f)
             )
         }
     }

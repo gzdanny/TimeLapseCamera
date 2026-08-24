@@ -61,6 +61,10 @@
     <string name="storage_dcim">系统相册 (DCIM)</string>
     <string name="storage_sd_card">SD 卡</string>
     <string name="storage_sd_not_available">SD 卡不可用</string>
+    <string name="settings_storage_threshold">清理阈值</string>
+    <string name="settings_storage_safe_line">安全线</string>
+    <string name="settings_storage_gb">GB</string>
+    <string name="settings_storage_threshold_desc">剩余空间低于此值时删除旧照片</string>
 
     <!-- 水印设置 -->
     <string name="settings_watermark_text">自定义文字</string>
@@ -101,4 +105,5 @@
     <string name="validation_url_verified">URL 验证成功，返回 %1$d 秒</string>
     <string name="validation_url_fetch_failed">URL 验证失败：无法获取有效数值，未保存</string>
     <string name="validation_url_verifying">正在验证 URL…</string>
+    <string name="validation_storage_range">阈值必须小于安全线，且均大于 0</string>
 </resources>

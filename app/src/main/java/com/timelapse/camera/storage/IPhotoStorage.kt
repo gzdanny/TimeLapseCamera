@@ -1,15 +1,18 @@
 package com.timelapse.camera.storage
 
 import android.graphics.Bitmap
+import com.timelapse.camera.util.BatteryMonitor
+import com.timelapse.camera.util.LogBuffer
 import java.io.File
 
 /**
  * 照片存储接口 —— 存储策略抽象。
  *
  * 设计意图（模块插拔）：
- * - LocalPhotoStorage: 第一版本地存储实现
- * - 后续可新增 FifoCleaner（自动删除旧照片释放空间）
- * - 后续可新增 CloudUploader（加密上传专用服务器）
+ * - LocalPhotoStorage: 本地存储实现（App 私有目录 / SD 卡）
+ * - DcimPhotoStorage: DCIM 公共目录存储实现
+ * - cleanupOldPhotos(): FIFO 清理，默认实现基于 File API
+ *
  * 调用方（CaptureService）只依赖此接口，不关心底层存储细节。
  */
 interface IPhotoStorage {
@@ -33,7 +36,7 @@ interface IPhotoStorage {
     /** 已存储照片数量 */
     fun getPhotoCount(): Int
 
-    /** 照片根目录（便于后续 FIFO 清理或导出） */
+    /** 照片根目录（便于 FIFO 清理或导出） */
     fun getPhotoDir(): File
 
     /** 获取最近一张照片（按文件名排序，最新的在前），没有则返回 null */
@@ -41,4 +44,77 @@ interface IPhotoStorage {
 
     /** 获取所有照片列表（按时间倒序） */
     fun getAllPhotos(): List<File>
+
+    /**
+     * FIFO 清理旧照片：剩余空间低于阈值时，按时间从旧到新删除，直到达到安全线。
+     *
+     * 算法：
+     * 1. 检测剩余空间 >= 阈值 → 跳过
+     * 2. 列出月份文件夹（字典序 = 时间序，最旧在前）
+     * 3. 进入最旧文件夹，列出文件（字典序 = 时间序，最旧在前）
+     * 4. 逐个删除，每删一个检测是否达到安全线
+     * 5. 单轮最多删 maxDeleteCount 个，防止清理耗时过长影响拍摄节奏
+     * 6. 空文件夹自动删除
+     *
+     * 默认实现基于 File API，适用于 LocalPhotoStorage。
+     * DcimPhotoStorage 在 API 29+ 可能需要 override 用 MediaStore 删除。
+     *
+     * @param thresholdGb 触发清理的剩余空间阈值（GB）
+     * @param safeLineGb 清理目标安全线（GB）
+     * @param maxDeleteCount 单轮最多删除的文件数
+     * @return 实际删除的文件数
+     */
+    fun cleanupOldPhotos(
+        thresholdGb: Float,
+        safeLineGb: Float,
+        maxDeleteCount: Int = 20
+    ): Int {
+        val photoDir = getPhotoDir()
+        var remaining = BatteryMonitor.getStorageRemainingGb(photoDir)
+        if (remaining >= thresholdGb) return 0
+
+        var deleted = 0
+        val monthFolders = photoDir.listFiles()?.filter { it.isDirectory }
+            ?.sortedBy { it.name } ?: run {
+            LogBuffer.log("W", "Storage", "无照片文件夹可清理")
+            return 0
+        }
+
+        for (folder in monthFolders) {
+            if (deleted >= maxDeleteCount) break
+            remaining = BatteryMonitor.getStorageRemainingGb(photoDir)
+            if (remaining >= safeLineGb) break
+
+            val files = folder.listFiles()
+                ?.filter { it.isFile && it.extension.equals("jpg", ignoreCase = true) }
+                ?.sortedBy { it.name } ?: continue
+
+            for (file in files) {
+                if (deleted >= maxDeleteCount) break
+                remaining = BatteryMonitor.getStorageRemainingGb(photoDir)
+                if (remaining >= safeLineGb) break
+
+                if (file.delete()) {
+                    deleted++
+                } else {
+                    LogBuffer.log("W", "Storage", "删除失败: ${file.name}")
+                }
+            }
+
+            if (folder.listFiles()?.isEmpty() == true) {
+                folder.delete()
+            }
+        }
+
+        if (deleted > 0) {
+            LogBuffer.log("I", "Storage", "FIFO 清理: 删除 $deleted 个文件, 剩余 ${BatteryMonitor.getStorageRemainingGb(photoDir)}GB")
+            if (BatteryMonitor.getStorageRemainingGb(photoDir) < safeLineGb && deleted >= maxDeleteCount) {
+                LogBuffer.log("W", "Storage", "本轮清理未完成，下轮继续")
+            }
+        }
+        if (deleted == 0 && remaining < thresholdGb) {
+            LogBuffer.log("W", "Storage", "存储不足但无可删文件")
+        }
+        return deleted
+    }
 }

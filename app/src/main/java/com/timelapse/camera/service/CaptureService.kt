@@ -142,6 +142,12 @@ class CaptureService : Service() {
                 // ── 0. 检测存储位置是否变更，变更则重建 storage 实例 ──
                 storage = PhotoStorageFactory.create(applicationContext, config)
 
+                // ── 0.5 FIFO 清理：拍摄前检测存储空间，不足则删旧照片 ──
+                storage.cleanupOldPhotos(
+                    thresholdGb = config.storageThresholdGb,
+                    safeLineGb = config.storageSafeLineGb
+                )
+
                 // ── 1. 远程配置：拉取下次拍摄延迟 ──
                 var nextDelay = config.intervalSeconds
                 if (!config.remoteConfigUrl.isNullOrBlank()) {

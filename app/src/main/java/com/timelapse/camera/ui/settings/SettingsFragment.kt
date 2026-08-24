@@ -83,6 +83,8 @@ class SettingsFragment : Fragment() {
         binding.switchStorage.isChecked = config.watermarkShowStorage
         binding.switchTemperature.isChecked = config.watermarkShowTemperature
         binding.etRemoteUrl.setText(config.remoteConfigUrl ?: "")
+        binding.etStorageThreshold.setText(config.storageThresholdGb.toString())
+        binding.etStorageSafeLine.setText(config.storageSafeLineGb.toString())
 
         // 摄像头方向
         val position = if (config.cameraFacing == CameraCharacteristics.LENS_FACING_BACK) 0 else 1
@@ -240,6 +242,14 @@ class SettingsFragment : Fragment() {
             }
         }
 
+        // 存储清理阈值
+        binding.etStorageThreshold.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) saveStorageThreshold()
+        }
+        binding.etStorageSafeLine.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) saveStorageSafeLine()
+        }
+
         // 权限跳转
         binding.rowCameraPermission.setOnClickListener {
             startActivity(PermissionChecker.cameraPermissionIntent(requireContext()))
@@ -317,6 +327,46 @@ class SettingsFragment : Fragment() {
             }
 
             binding.etRemoteUrl.isEnabled = true
+        }
+    }
+
+    /**
+     * 保存存储清理阈值，带校验：必须 > 0 且 < 安全线。
+     */
+    private fun saveStorageThreshold() {
+        val input = binding.etStorageThreshold.text?.toString()?.toFloatOrNull()
+        if (input == null || input <= 0) {
+            binding.etStorageThreshold.setText(config.storageThresholdGb.toString())
+            return
+        }
+        if (input >= config.storageSafeLineGb) {
+            Toast.makeText(requireContext(), R.string.validation_storage_range, Toast.LENGTH_SHORT).show()
+            binding.etStorageThreshold.setText(config.storageThresholdGb.toString())
+            return
+        }
+        if (config.storageThresholdGb != input) {
+            config = config.copy(storageThresholdGb = input)
+            config.save(requireContext())
+        }
+    }
+
+    /**
+     * 保存存储清理安全线，带校验：必须 > 阈值。
+     */
+    private fun saveStorageSafeLine() {
+        val input = binding.etStorageSafeLine.text?.toString()?.toFloatOrNull()
+        if (input == null || input <= 0) {
+            binding.etStorageSafeLine.setText(config.storageSafeLineGb.toString())
+            return
+        }
+        if (input <= config.storageThresholdGb) {
+            Toast.makeText(requireContext(), R.string.validation_storage_range, Toast.LENGTH_SHORT).show()
+            binding.etStorageSafeLine.setText(config.storageSafeLineGb.toString())
+            return
+        }
+        if (config.storageSafeLineGb != input) {
+            config = config.copy(storageSafeLineGb = input)
+            config.save(requireContext())
         }
     }
 
