@@ -161,10 +161,6 @@ class CameraXController(
 
                 val bmp = takePictureAndDecode()
                 LogBuffer.log("I", TAG, "拍照解码成功 ${bmp.width}x${bmp.height}")
-                // 采样像素确认内容不是全白/全黑
-                val centerPixel = bmp.getPixel(bmp.width / 2, bmp.height / 2)
-                val cornerPixel = bmp.getPixel(10, 10)
-                LogBuffer.log("I", TAG, "像素采样: 中心=#${Integer.toHexString(centerPixel)}, 角落=#${Integer.toHexString(cornerPixel)}")
                 bmp
             }
 
