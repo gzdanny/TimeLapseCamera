@@ -28,7 +28,7 @@ jobs:
         packages: 'platforms;android-34 build-tools;34.0.0'
 
     - name: Set up Gradle
-      uses: gradle/actions/setup-gradle@v4
+      uses: gradle/actions/setup-gradle@v5
       with:
         gradle-version: '8.0'
 
