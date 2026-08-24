@@ -10,8 +10,6 @@
     <!-- 通知渠道 -->
     <string name="channel_name">拍摄服务</string>
     <string name="channel_desc">拍摄期间显示通知，确保服务不被系统杀死</string>
-    <string name="notif_title">延时拍摄运行中</string>
-    <string name="notif_countdown">下次拍摄倒计时</string>
 
     <!-- 状态页 -->
     <string name="status_running">● 运行中</string>

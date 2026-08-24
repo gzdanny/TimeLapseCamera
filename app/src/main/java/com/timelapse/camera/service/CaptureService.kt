@@ -316,8 +316,6 @@ class CaptureService : Service() {
 
         val nextTime = System.currentTimeMillis() + nextDelaySeconds * 1000L
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(R.string.notif_title))
-            .setContentText(getString(R.string.notif_countdown))
             .setSmallIcon(R.drawable.ic_camera)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
