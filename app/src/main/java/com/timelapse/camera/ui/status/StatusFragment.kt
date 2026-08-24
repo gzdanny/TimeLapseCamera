@@ -55,6 +55,7 @@ class StatusFragment : Fragment() {
         super.onCreate(savedInstanceState)
         config = CaptureConfig.load(requireContext())
         storage = PhotoStorageFactory.create(requireContext(), config)
+        LogBuffer.init(requireContext())
     }
 
     override fun onCreateView(
