@@ -50,6 +50,7 @@ class CameraXController(
     private var cameraProvider: ProcessCameraProvider? = null
     private var imageCapture: ImageCapture? = null
     private var lifecycleRegistry: LifecycleRegistry? = null
+    private var lifecycleOwner: LifecycleOwner? = null
 
     override suspend fun capture(): CaptureResult {
         // 主镜头先试
@@ -84,9 +85,11 @@ class CameraXController(
             cameraProvider = provider
 
             // 手动创建 LifecycleOwner（Service 没有生命周期，需要自己造）
-            lifecycleRegistry = LifecycleRegistry(object : LifecycleOwner {
+            val owner = object : LifecycleOwner {
                 override val lifecycle: Lifecycle get() = lifecycleRegistry!!
-            }).apply { currentState = Lifecycle.State.RESUMED }
+            }
+            lifecycleRegistry = LifecycleRegistry(owner).apply { currentState = Lifecycle.State.RESUMED }
+            lifecycleOwner = owner
 
             // 构建 ImageCapture 用例
             val capture = ImageCapture.Builder()
@@ -104,7 +107,7 @@ class CameraXController(
             // 解绑之前可能绑定的用例，再绑定新的
             provider.unbindAll()
             provider.bindToLifecycle(
-                lifecycleRegistry!!, cameraSelector, capture
+                lifecycleOwner!!, cameraSelector, capture
             )
 
             // 拍照并转为 Bitmap
@@ -185,5 +188,6 @@ class CameraXController(
         imageCapture = null
         lifecycleRegistry?.currentState = Lifecycle.State.DESTROYED
         lifecycleRegistry = null
+        lifecycleOwner = null
     }
 }
