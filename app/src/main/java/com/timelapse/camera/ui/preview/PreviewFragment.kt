@@ -1,11 +1,8 @@
 package com.timelapse.camera.ui.preview
 
 import android.Manifest
-import android.graphics.Bitmap
 import android.content.pm.PackageManager
 import android.os.Bundle
-import java.io.File
-import java.io.FileOutputStream
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -185,43 +182,42 @@ class PreviewFragment : Fragment() {
                 LogBuffer.log("I", "TestPhoto",
                     "拍摄完成: ${if (result is CaptureResult.Success) "成功" else "失败"}")
 
-                // ── 3. 先存一张原图（不加水印），验证高分辨率拍照本身是否正常 ──
-                val rawPath = withContext(Dispatchers.IO) {
-                    if (result is CaptureResult.Success) {
-                        LogBuffer.log("I", "TestPhoto", "保存原图(无水印)")
-                        val rawFileName = "Test_raw.jpg"
-                        val rawFile = File(requireContext().filesDir, rawFileName)
-                        FileOutputStream(rawFile).use { out ->
-                            result.bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-                        }
-                        rawFile.absolutePath
-                    } else ""
-                }
-
-                // ── 4. 水印 + 保存（IO 线程，避免阻塞 UI）──
-                LogBuffer.log("I", "TestPhoto", "开始水印处理和保存")
+                // ── 3. 水印 + 保存（IO 线程，避免阻塞 UI）──
+                // 水印内容全关时直接跳过水印，节省内存
+                LogBuffer.log("I", "TestPhoto", "开始保存处理")
                 val savedPath = withContext(Dispatchers.IO) {
-                    val watermarkOptions = WatermarkOptions(
-                        customText = config.watermarkText,
-                        showBattery = config.watermarkShowBattery,
-                        showStorage = config.watermarkShowStorage,
-                        showTemperature = config.watermarkShowTemperature,
-                        batteryPercent = BatteryMonitor.getBatteryPercent(requireContext()),
-                        storageRemainingGb = BatteryMonitor.getStorageRemainingGb(storage.getPhotoDir()),
-                        temperatureCelsius = BatteryMonitor.getBatteryTemperature(requireContext())
-                    )
+                    val hasWatermark = !config.watermarkText.isNullOrBlank() ||
+                            config.watermarkShowBattery ||
+                            config.watermarkShowStorage ||
+                            config.watermarkShowTemperature
 
                     val bitmapToSave = when (result) {
                         is CaptureResult.Success -> {
                             LogBuffer.log("I", "TestPhoto",
-                                "原始照片尺寸: ${result.bitmap.width}x${result.bitmap.height}")
-                            watermarkProcessor.apply(result.bitmap, result.timestamp, watermarkOptions)
+                                "照片尺寸: ${result.bitmap.width}x${result.bitmap.height}")
+                            if (hasWatermark) {
+                                LogBuffer.log("I", "TestPhoto", "开始水印处理")
+                                val watermarkOptions = WatermarkOptions(
+                                    customText = config.watermarkText,
+                                    showBattery = config.watermarkShowBattery,
+                                    showStorage = config.watermarkShowStorage,
+                                    showTemperature = config.watermarkShowTemperature,
+                                    batteryPercent = BatteryMonitor.getBatteryPercent(requireContext()),
+                                    storageRemainingGb = BatteryMonitor.getStorageRemainingGb(storage.getPhotoDir()),
+                                    temperatureCelsius = BatteryMonitor.getBatteryTemperature(requireContext())
+                                )
+                                watermarkProcessor.apply(result.bitmap, result.timestamp, watermarkOptions)
+                            } else {
+                                LogBuffer.log("I", "TestPhoto", "水印全关，跳过水印")
+                                result.bitmap
+                            }
                         }
                         is CaptureResult.Failure -> {
                             watermarkProcessor.createErrorBitmap(timestamp)
                         }
                     }
 
+                    LogBuffer.log("I", "TestPhoto", "写入存储")
                     val path = storage.saveTestPhoto(bitmapToSave)
                     LogBuffer.log("I", "TestPhoto", "保存完成: $path")
                     path

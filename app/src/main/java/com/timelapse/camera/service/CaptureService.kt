@@ -172,14 +172,23 @@ class CaptureService : Service() {
                     val result = camera.capture()
                     LogBuffer.log("I", TAG, "拍摄结果: ${if (result is CaptureResult.Success) "成功" else "失败: ${(result as CaptureResult.Failure).message}"}")
 
-                    // 构建水印配置（电量/存储/温度从系统读取）
-                    val watermarkOptions = buildWatermarkOptions(config)
+                    // 拍摄成功：加水印 + 存盘；拍摄失败：生成黑图占位 + 存盘
+                    // 优化：所有水印内容全关时直接跳过水印，零额外内存
+                    val hasWatermark = !config.watermarkText.isNullOrBlank() ||
+                            config.watermarkShowBattery ||
+                            config.watermarkShowStorage ||
+                            config.watermarkShowTemperature
 
-                    // 拍摄成功：正常水印 + 存盘
-                    // 拍摄失败：生成黑图占位 + 存盘（用户翻照片时能看到"App醒了但摄像头挂了"）
                     val bitmapToSave = when (result) {
                         is CaptureResult.Success -> {
-                            watermarkProcessor.apply(result.bitmap, result.timestamp, watermarkOptions)
+                            if (hasWatermark) {
+                                LogBuffer.log("I", TAG, "开始水印处理")
+                                val watermarkOptions = buildWatermarkOptions(config)
+                                watermarkProcessor.apply(result.bitmap, result.timestamp, watermarkOptions)
+                            } else {
+                                LogBuffer.log("I", TAG, "水印全关，跳过水印处理")
+                                result.bitmap
+                            }
                         }
                         is CaptureResult.Failure -> {
                             Log.e(TAG, "拍摄失败: ${result.message}", result.cause)
