@@ -89,11 +89,12 @@ class CameraXController(
             }).apply { currentState = Lifecycle.State.RESUMED }
 
             // 构建 ImageCapture 用例
-            imageCapture = ImageCapture.Builder()
+            val capture = ImageCapture.Builder()
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .setJpegQuality(85)
                 .setTargetRotation(android.view.Surface.ROTATION_0)
                 .build()
+            imageCapture = capture
 
             // 选择摄像头（CameraX 的 LENS_FACING 常量值与 Camera2 一致，直接使用）
             val cameraSelector = CameraSelector.Builder()
@@ -103,7 +104,7 @@ class CameraXController(
             // 解绑之前可能绑定的用例，再绑定新的
             provider.unbindAll()
             provider.bindToLifecycle(
-                lifecycleRegistry!!, cameraSelector, imageCapture
+                lifecycleRegistry!!, cameraSelector, capture
             )
 
             // 拍照并转为 Bitmap
