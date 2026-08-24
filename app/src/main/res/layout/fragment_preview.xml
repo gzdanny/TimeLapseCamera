@@ -32,7 +32,8 @@
             android:layout_marginTop="8dp"
             android:text="@string/preview_capture_hint"
             android:textColor="@android:color/white"
-            android:textSize="12sp" />
+            android:textSize="12sp"
+            android:gravity="center" />
     </LinearLayout>
 
     <!-- 试拍结果弹窗 -->

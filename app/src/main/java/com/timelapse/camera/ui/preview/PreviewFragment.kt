@@ -9,8 +9,6 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
@@ -18,8 +16,10 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import coil.load
 import com.timelapse.camera.R
+import com.timelapse.camera.camera.CameraXController
 import com.timelapse.camera.config.CaptureConfig
 import com.timelapse.camera.databinding.FragmentPreviewBinding
+import com.timelapse.camera.model.CaptureResult
 import com.timelapse.camera.storage.IPhotoStorage
 import com.timelapse.camera.storage.PhotoStorageFactory
 import com.timelapse.camera.util.BatteryMonitor
@@ -28,27 +28,22 @@ import com.timelapse.camera.watermark.WatermarkProcessor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * 预览页 Fragment —— 构图对齐 + 试拍验证。
  *
  * 功能：
  * - CameraX Preview 用例实时预览画面
- * - 「立即拍一张」试拍：拍一张 + 加水印 + 弹窗显示效果
- * - 试拍照片保存在缓存目录，用户确认效果后可删除
+ * - 「立即拍一张」试拍：走与正常拍摄完全相同的管线（CameraXController → 水印 → 存储）
+ *   唯一区别：不循环、不等待、用固定文件名 Test.jpg
  *
  * 功耗设计：
  * - 只在页面可见时绑定预览用例
  * - 切换到其他 Tab 时 onStop() 自动解绑，摄像头完全释放
- * - 这也是为什么用 viewLifecycleOwner.lifecycle 绑定 CameraX
  *
  * 教学要点：
- * - ActivityResultContracts.RequestPermission 申请相机权限（现代写法）
- * - CameraX Preview + ImageCapture 双用例绑定
+ * - 试拍代码复用 CaptureService 的拍摄管线，确保验证的是真实流程
+ * - 试拍照片用固定文件名，方便用户在相册中快速定位检查
  */
 class PreviewFragment : Fragment() {
 
@@ -57,19 +52,10 @@ class PreviewFragment : Fragment() {
 
     private lateinit var config: CaptureConfig
     private lateinit var storage: IPhotoStorage
-    private var imageCapture: ImageCapture? = null
     private var cameraProvider: ProcessCameraProvider? = null
 
     private val watermarkProcessor = WatermarkProcessor()
 
-    /**
-     * 相机权限申请 launcher。
-     *
-     * 为什么用 ActivityResultContracts 而不是 requestPermissions()？
-     * - 官方推荐的现代 API，类型安全，不需要手动管理 requestCode
-     * - 在字段声明处调用即可：内部会延迟到 Fragment onAttach 之后再完成注册
-     * - 注意：launch() 必须在 Fragment 可见之后调用（onStart 及以后）
-     */
     private val cameraPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -110,14 +96,9 @@ class PreviewFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        // 单一数据源：config 和 storage 来自同一次磁盘读取
         reloadFromDisk()
     }
 
-    /**
-     * 从磁盘重新加载 config，并基于同一份 config 创建 storage。
-     * 保证 config 和 storage 永远来自同一次读取，消除不同步风险。
-     */
     private fun reloadFromDisk() {
         config = CaptureConfig.load(requireContext())
         storage = PhotoStorageFactory.create(requireContext(), config)
@@ -127,7 +108,6 @@ class PreviewFragment : Fragment() {
         super.onDestroyView()
         cameraProvider?.unbindAll()
         cameraProvider = null
-        imageCapture = null
         _binding = null
     }
 
@@ -156,11 +136,6 @@ class PreviewFragment : Fragment() {
                     it.setSurfaceProvider(binding.previewView.surfaceProvider)
                 }
 
-            imageCapture = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .setJpegQuality(85)
-                .build()
-
             val cameraSelector = CameraSelector.Builder()
                 .requireLensFacing(config.cameraFacing)
                 .build()
@@ -168,7 +143,7 @@ class PreviewFragment : Fragment() {
             try {
                 provider.unbindAll()
                 provider.bindToLifecycle(
-                    viewLifecycleOwner, cameraSelector, preview, imageCapture
+                    viewLifecycleOwner, cameraSelector, preview
                 )
             } catch (e: Exception) {
                 Toast.makeText(requireContext(), "启动预览失败: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -176,99 +151,85 @@ class PreviewFragment : Fragment() {
         }, ContextCompat.getMainExecutor(requireContext()))
     }
 
-    // ──────────── 试拍 ────────────
+    // ──────────── 试拍（与 CaptureService 相同的管线）────────────
 
+    /**
+     * 试拍流程与 CaptureService.captureLoop() 的单次拍摄完全一致：
+     * 1. 释放预览（CameraXController 内部会 unbindAll）
+     * 2. CameraXController.capture() → CaptureResult
+     * 3. WatermarkProcessor.apply() 加水印（或 createErrorBitmap 生成黑图）
+     * 4. storage.saveTestPhoto() 保存到用户配置的存储位置（固定文件名 Test.jpg）
+     * 5. 重新绑定预览
+     *
+     * 唯一区别：不循环、不等待、不设闹钟、不更新通知
+     */
     private fun takeTestPhoto() {
-        val capture = imageCapture ?: run {
-            Toast.makeText(requireContext(), R.string.preview_no_camera_permission, Toast.LENGTH_SHORT).show()
-            return
-        }
-
         binding.btnCapture.isEnabled = false
 
-        val outputFile = File(
-            requireContext().cacheDir,
-            "test_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())}.jpg"
-        )
+        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+            // 先释放预览，避免 CameraX 用例冲突
+            withContext(Dispatchers.Main) {
+                cameraProvider?.unbindAll()
+            }
 
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(outputFile).build()
+            val timestamp = System.currentTimeMillis()
 
-        capture.takePicture(
-            outputOptions,
-            ContextCompat.getMainExecutor(requireContext()),
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    // 加水印后显示
-                    processAndShowTestPhoto(outputFile)
+            // ── 1. 拍摄（与 CaptureService 相同：CameraXController）──
+            val camera = CameraXController(requireContext(), config.cameraFacing)
+            val result = camera.capture()
+
+            // ── 2. 水印（与 CaptureService 相同：WatermarkProcessor）──
+            val watermarkOptions = WatermarkOptions(
+                customText = config.watermarkText,
+                showBattery = config.watermarkShowBattery,
+                showStorage = config.watermarkShowStorage,
+                showTemperature = config.watermarkShowTemperature,
+                batteryPercent = BatteryMonitor.getBatteryPercent(requireContext()),
+                storageRemainingGb = BatteryMonitor.getStorageRemainingGb(storage.getPhotoDir()),
+                temperatureCelsius = BatteryMonitor.getBatteryTemperature(requireContext())
+            )
+
+            val bitmapToSave = when (result) {
+                is CaptureResult.Success -> {
+                    watermarkProcessor.apply(result.bitmap, result.timestamp, watermarkOptions)
                 }
-
-                override fun onError(exception: ImageCaptureException) {
-                    binding.btnCapture.isEnabled = true
-                    Toast.makeText(
-                        requireContext(),
-                        "${getString(R.string.preview_test_fail)}: ${exception.message}",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                is CaptureResult.Failure -> {
+                    watermarkProcessor.createErrorBitmap(timestamp)
                 }
             }
-        )
-    }
 
-    private fun processAndShowTestPhoto(file: File) {
-        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-            runCatching {
-                // 解码为 mutable Bitmap（inMutable=true，水印模块可直接绘制，零额外内存）
-                val options = android.graphics.BitmapFactory.Options().apply {
-                    inMutable = true
-                }
-                val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath, options)
-                    ?: throw RuntimeException("试拍照片解码失败")
-
-                // 构建水印选项
-                val watermarkOptions = WatermarkOptions(
-                    customText = config.watermarkText,
-                    showBattery = config.watermarkShowBattery,
-                    showStorage = config.watermarkShowStorage,
-                    showTemperature = config.watermarkShowTemperature,
-                    batteryPercent = BatteryMonitor.getBatteryPercent(requireContext()),
-                    storageRemainingGb = BatteryMonitor.getStorageRemainingGb(storage.getPhotoDir()),
-                    temperatureCelsius = BatteryMonitor.getBatteryTemperature(requireContext())
-                )
-
-                // 绘制水印
-                watermarkProcessor.apply(bitmap, System.currentTimeMillis(), watermarkOptions)
-
-                // 保存到缓存
-                val outputFile = File(requireContext().cacheDir, "test_result.jpg")
-                outputFile.outputStream().use { out ->
-                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, out)
-                }
-                bitmap.recycle()
-
-                // 删除原始试拍文件
-                file.delete()
-
-                outputFile
-            }.onSuccess { resultFile ->
+            // ── 3. 保存（与 CaptureService 相同的存储路径，固定文件名）──
+            val savedPath = try {
+                storage.saveTestPhoto(bitmapToSave)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                bitmapToSave.recycle()
                 withContext(Dispatchers.Main) {
-                    binding.btnCapture.isEnabled = true
-                    binding.cardTestResult.visibility = View.VISIBLE
-                    binding.ivTestResult.load(resultFile)
-                    binding.tvTestResult.text = getString(R.string.preview_test_ok)
-
-                    // 3 秒后自动隐藏
-                    binding.cardTestResult.postDelayed({
-                        binding.cardTestResult.visibility = View.GONE
-                    }, 3000)
+                    _binding?.let { b ->
+                        b.btnCapture.isEnabled = true
+                        Toast.makeText(
+                            requireContext(),
+                            "${getString(R.string.preview_test_fail)}: ${e.message}",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
                 }
-            }.onFailure {
-                withContext(Dispatchers.Main) {
-                    binding.btnCapture.isEnabled = true
-                    Toast.makeText(
-                        requireContext(),
-                        "${getString(R.string.preview_test_fail)}: ${it.message}",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                return@launch
+            }
+
+            // ── 4. 重新绑定预览 ──
+            withContext(Dispatchers.Main) {
+                val b = _binding ?: return@withContext
+                b.btnCapture.isEnabled = true
+                startCamera()
+
+                b.cardTestResult.visibility = View.VISIBLE
+                b.ivTestResult.load(savedPath)
+                b.tvTestResult.text = if (result is CaptureResult.Success) {
+                    getString(R.string.preview_test_saved)
+                } else {
+                    getString(R.string.preview_test_fail)
                 }
             }
         }

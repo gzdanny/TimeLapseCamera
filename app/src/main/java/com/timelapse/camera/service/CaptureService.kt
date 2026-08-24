@@ -23,6 +23,7 @@ import com.timelapse.camera.scheduler.CaptureScheduler
 import com.timelapse.camera.storage.IPhotoStorage
 import com.timelapse.camera.storage.PhotoStorageFactory
 import com.timelapse.camera.util.BatteryMonitor
+import com.timelapse.camera.util.LogBuffer
 import com.timelapse.camera.watermark.WatermarkOptions
 import com.timelapse.camera.watermark.WatermarkProcessor
 import kotlinx.coroutines.CoroutineScope
@@ -92,6 +93,7 @@ class CaptureService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 Log.i(TAG, "收到停止指令")
+                LogBuffer.log("I", TAG, "收到停止指令")
                 CaptureConfig.load(applicationContext)
                     .copy(isRunning = false)
                     .save(applicationContext)
@@ -112,6 +114,7 @@ class CaptureService : Service() {
                 startForeground(NOTIFICATION_ID, buildNotification(initialDelay))
 
                 if (captureJob == null || !captureJob!!.isActive) {
+                    LogBuffer.log("I", TAG, "拍摄服务启动，间隔 ${config.intervalSeconds}s")
                     captureJob = serviceScope.launch { captureLoop() }
                 }
                 return START_STICKY
@@ -144,6 +147,7 @@ class CaptureService : Service() {
                     val remoteDelay = remoteConfigFetcher.fetchNextInterval(config.remoteConfigUrl!!)
                     if (remoteDelay != null) {
                         nextDelay = remoteDelay
+                        LogBuffer.log("I", TAG, "远程配置: 间隔=${remoteDelay}s")
                         config = config.copy(lastRemoteInterval = remoteDelay)
                         config.save(applicationContext)
                     } else if (config.lastRemoteInterval > 0) {
@@ -185,12 +189,15 @@ class CaptureService : Service() {
                             )
                             config.save(applicationContext)
                             Log.i(TAG, "拍摄完成 #${config.captureCount}")
+                            LogBuffer.log("I", TAG, "拍摄完成 #${config.captureCount}")
                         } else {
                             Log.w(TAG, "黑图占位已保存（拍摄失败）")
+                            LogBuffer.log("W", TAG, "拍摄失败，已保存黑图占位")
                         }
                     }.onFailure { e ->
                         Log.e(TAG, "写入磁盘失败", e)
-                        bitmapToSave.recycle() // 写入失败也要手动回收，避免内存泄漏
+                        LogBuffer.log("E", TAG, "写入磁盘失败: ${e.message}")
+                        bitmapToSave.recycle()
                     }
                 } finally {
                     releaseWakeLock()

@@ -57,6 +57,15 @@ class LocalPhotoStorage(
         file.absolutePath
     }
 
+    override suspend fun saveTestPhoto(bitmap: Bitmap): String = withContext(Dispatchers.IO) {
+        val file = File(baseDir, "Test.jpg")
+        FileOutputStream(file).use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+        }
+        bitmap.recycle()
+        file.absolutePath
+    }
+
     override fun getPhotoCount(): Int =
         baseDir.walkTopDown()
             .filter { it.isFile && it.extension.equals("jpg", ignoreCase = true) }

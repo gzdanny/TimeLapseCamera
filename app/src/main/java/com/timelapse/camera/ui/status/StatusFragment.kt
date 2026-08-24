@@ -15,6 +15,7 @@ import com.timelapse.camera.service.CaptureService
 import com.timelapse.camera.storage.IPhotoStorage
 import com.timelapse.camera.storage.PhotoStorageFactory
 import com.timelapse.camera.util.BatteryMonitor
+import com.timelapse.camera.util.LogBuffer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -150,6 +151,10 @@ class StatusFragment : Fragment() {
         binding.tvBattery.text = getString(R.string.status_battery_format, battery)
         binding.tvStorage.text = getString(R.string.status_storage_format, storageGb)
         binding.tvTemperature.text = getString(R.string.status_temperature_format, temp)
+
+        // 运行日志
+        val logs = LogBuffer.getFormattedLogs()
+        binding.tvLog.text = logs.ifEmpty { getString(R.string.status_log_empty) }
 
         // 最近一张照片：读最新一张文件很快，直接刷新即可
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {

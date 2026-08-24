@@ -1,5 +1,6 @@
 package com.timelapse.camera.storage
 
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
@@ -57,6 +58,63 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
         } else {
             saveViaFileApi(bitmap, fileName, monthDir)
         }
+    }
+
+    override suspend fun saveTestPhoto(bitmap: Bitmap): String = withContext(Dispatchers.IO) {
+        val fileName = "Test.jpg"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            saveTestViaMediaStore(bitmap, fileName)
+        } else {
+            saveTestViaFileApi(bitmap, fileName)
+        }
+    }
+
+    private fun saveTestViaMediaStore(bitmap: Bitmap, fileName: String): String {
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/$SUB_DIR")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+
+        val collection = MediaStore.Images.Media.getContentUri(
+            MediaStore.VOLUME_EXTERNAL_PRIMARY
+        )
+        // 查找已有的 Test.jpg，有则覆盖，无则新建
+        val existingUri = findExistingTestUri(collection, fileName)
+        val uri = existingUri ?: context.contentResolver.insert(collection, values)
+
+        context.contentResolver.openOutputStream(uri)?.use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+        } ?: throw IOException("打开输出流失败")
+        bitmap.recycle()
+
+        values.clear()
+        values.put(MediaStore.Images.Media.IS_PENDING, 0)
+        context.contentResolver.update(uri, values, null, null)
+
+        getFilePathFromUri(uri) ?: uri.toString()
+    }
+
+    private fun saveTestViaFileApi(bitmap: Bitmap, fileName: String): String {
+        val file = File(baseDir, fileName)
+        FileOutputStream(file).use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+        }
+        bitmap.recycle()
+        return file.absolutePath
+    }
+
+    private fun findExistingTestUri(collection: Uri, fileName: String): Uri? {
+        val projection = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DISPLAY_NAME)
+        val selection = "${MediaStore.Images.Media.DISPLAY_NAME} = ?"
+        context.contentResolver.query(collection, projection, selection, arrayOf(fileName), null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val id = cursor.getLong(0)
+                return ContentUris.withAppendedId(collection, id)
+            }
+        }
+        return null
     }
 
     /**
