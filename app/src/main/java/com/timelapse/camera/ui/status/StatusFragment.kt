@@ -156,7 +156,6 @@ class StatusFragment : Fragment() {
         // 运行日志
         val logs = LogBuffer.getFormattedLogs()
         binding.tvLog.text = logs.ifEmpty { getString(R.string.status_log_empty) }
-        binding.svLog.post { binding.svLog.fullScroll(View.FOCUS_DOWN) }
 
         // 最近一张照片：读最新一张文件很快，直接刷新即可
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {

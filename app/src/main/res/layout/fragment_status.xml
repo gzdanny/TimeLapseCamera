@@ -107,6 +107,16 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- 控制按钮（第二行：信息栏下方、照片上方） -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnToggle"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginBottom="12dp"
+            android:text="@string/btn_start"
+            android:textSize="16sp"
+            app:cornerRadius="12dp" />
+
         <!-- 最近一张照片 -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
@@ -171,7 +181,7 @@
                 <ScrollView
                     android:id="@+id/svLog"
                     android:layout_width="match_parent"
-                    android:layout_height="200dp"
+                    android:layout_height="400dp"
                     android:layout_marginTop="8dp"
                     android:nestedScrollingEnabled="true">
 
@@ -186,15 +196,6 @@
                 </ScrollView>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
-
-        <!-- 控制按钮 -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnToggle"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:text="@string/btn_start"
-            android:textSize="16sp"
-            app:cornerRadius="12dp" />
 
     </LinearLayout>
 </ScrollView>

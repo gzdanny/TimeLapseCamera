@@ -3,6 +3,7 @@ package com.timelapse.camera
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
+import com.timelapse.camera.camera.CameraEnumerator
 import com.timelapse.camera.databinding.ActivityMainBinding
 import com.timelapse.camera.ui.gallery.GalleryFragment
 import com.timelapse.camera.ui.preview.PreviewFragment
@@ -39,6 +40,11 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState == null) {
             switchFragment(statusFragment)
             binding.bottomNav.selectedItemId = R.id.nav_status
+
+            // 启动时枚举所有摄像头，输出到日志（方便排查分辨率问题）
+            Thread {
+                runCatching { CameraEnumerator.enumerate(this) }
+            }.start()
         }
 
         // 底部导航点击事件
