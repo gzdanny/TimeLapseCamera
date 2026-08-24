@@ -160,8 +160,10 @@ class CaptureService : Service() {
                 acquireWakeLock()
                 val timestamp = System.currentTimeMillis()
                 try {
+                    LogBuffer.log("I", TAG, "开始拍摄 #${config.captureCount + 1}")
                     val camera: ICameraController = CameraXController(applicationContext, config.cameraFacing)
                     val result = camera.capture()
+                    LogBuffer.log("I", TAG, "拍摄结果: ${if (result is CaptureResult.Success) "成功" else "失败: ${(result as CaptureResult.Failure).message}"}")
 
                     // 构建水印配置（电量/存储/温度从系统读取）
                     val watermarkOptions = buildWatermarkOptions(config)
@@ -303,8 +305,12 @@ class CaptureService : Service() {
     }
 
     private fun updateNotification(nextDelaySeconds: Int) {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIFICATION_ID, buildNotification(nextDelaySeconds))
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.notify(NOTIFICATION_ID, buildNotification(nextDelaySeconds))
+        } catch (e: Exception) {
+            LogBuffer.log("E", TAG, "更新通知失败: ${e.message}")
+        }
     }
 
     override fun onDestroy() {

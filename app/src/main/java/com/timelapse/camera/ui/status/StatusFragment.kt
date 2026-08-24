@@ -190,12 +190,14 @@ class StatusFragment : Fragment() {
             config.copy(isRunning = false)
         } else {
             // 开始
+            val now = System.currentTimeMillis()
             val intent = Intent(context, CaptureService::class.java).apply {
                 action = CaptureService.ACTION_START
             }
             context.startForegroundService(intent)
-            nextCaptureTime = System.currentTimeMillis() + config.intervalSeconds * 1000L
-            config.copy(isRunning = true)
+            nextCaptureTime = now + config.intervalSeconds * 1000L
+            // 立刻写入 lastCaptureTime，保证 onResume 重新计算倒计时有基准
+            config.copy(isRunning = true, lastCaptureTime = now)
         }
         config.save(context)
         updateUI()

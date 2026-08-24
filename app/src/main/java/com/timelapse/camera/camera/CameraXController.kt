@@ -16,8 +16,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import com.timelapse.camera.model.CaptureResult
+import com.timelapse.camera.util.LogBuffer
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.guava.await
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
 /**
@@ -53,6 +57,7 @@ class CameraXController(
     private var lifecycleOwner: LifecycleOwner? = null
 
     override suspend fun capture(): CaptureResult {
+        LogBuffer.log("I", TAG, "开始拍摄, facing=${cameraFacing}")
         // 主镜头先试
         val firstResult = captureWithFacing(cameraFacing)
         if (firstResult is CaptureResult.Success) return firstResult
@@ -60,11 +65,10 @@ class CameraXController(
         // 失败了切换备用镜头重试一次
         val otherFacing = otherFacing(cameraFacing)
         if (otherFacing != null) {
-            Log.w(TAG, "主镜头失败，切换到备用镜头重试")
+            LogBuffer.log("W", TAG, "主镜头失败，切换备用镜头 facing=$otherFacing")
             val fallbackResult = captureWithFacing(otherFacing)
             if (fallbackResult is CaptureResult.Success) return fallbackResult
 
-            // 两个都失败，合并错误信息
             val firstMsg = (firstResult as? CaptureResult.Failure)?.message ?: "未知错误"
             val secondMsg = (fallbackResult as? CaptureResult.Failure)?.message ?: "未知错误"
             return CaptureResult.Failure(
@@ -78,47 +82,52 @@ class CameraXController(
     /**
      * 使用指定方向的摄像头执行一次完整拍摄。
      * 内部完成 "初始化 CameraX → 绑定 ImageCapture → 拍照 → 释放" 全流程。
+     *
+     * 线程安全：CameraX 的 unbindAll/bindToLifecycle 必须在主线程执行。
+     * 无论调用者在哪个线程，内部用 withContext(Dispatchers.Main) 保证。
      */
     private suspend fun captureWithFacing(facing: Int): CaptureResult {
         return try {
-            val provider = ProcessCameraProvider.getInstance(context).await()
-            cameraProvider = provider
+            LogBuffer.log("I", TAG, "captureWithFacing 开始, facing=$facing")
 
-            // 手动创建 LifecycleOwner（Service 没有生命周期，需要自己造）
-            val owner = object : LifecycleOwner {
-                override val lifecycle: Lifecycle get() = lifecycleRegistry!!
+            val bitmap = withContext(Dispatchers.Main) {
+                val provider = ProcessCameraProvider.getInstance(context).await()
+                cameraProvider = provider
+                LogBuffer.log("I", TAG, "Provider 获取成功")
+
+                val owner = object : LifecycleOwner {
+                    override val lifecycle: Lifecycle get() = lifecycleRegistry!!
+                }
+                lifecycleRegistry = LifecycleRegistry(owner).apply { currentState = Lifecycle.State.RESUMED }
+                lifecycleOwner = owner
+
+                val capture = ImageCapture.Builder()
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                    .setJpegQuality(85)
+                    .setTargetRotation(android.view.Surface.ROTATION_0)
+                    .build()
+                imageCapture = capture
+
+                val cameraSelector = CameraSelector.Builder()
+                    .requireLensFacing(facing)
+                    .build()
+
+                provider.unbindAll()
+                provider.bindToLifecycle(lifecycleOwner!!, cameraSelector, capture)
+                LogBuffer.log("I", TAG, "ImageCapture 绑定成功")
+
+                val bmp = takePictureAndDecode()
+                LogBuffer.log("I", TAG, "拍照解码成功 ${bmp.width}x${bmp.height}")
+                bmp
             }
-            lifecycleRegistry = LifecycleRegistry(owner).apply { currentState = Lifecycle.State.RESUMED }
-            lifecycleOwner = owner
-
-            // 构建 ImageCapture 用例
-            val capture = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .setJpegQuality(85)
-                .setTargetRotation(android.view.Surface.ROTATION_0)
-                .build()
-            imageCapture = capture
-
-            // 选择摄像头（CameraX 的 LENS_FACING 常量值与 Camera2 一致，直接使用）
-            val cameraSelector = CameraSelector.Builder()
-                .requireLensFacing(facing)
-                .build()
-
-            // 解绑之前可能绑定的用例，再绑定新的
-            provider.unbindAll()
-            provider.bindToLifecycle(
-                lifecycleOwner!!, cameraSelector, capture
-            )
-
-            // 拍照并转为 Bitmap
-            val bitmap = takePictureAndDecode()
 
             CaptureResult.Success(bitmap, System.currentTimeMillis())
         } catch (e: Exception) {
-            Log.e(TAG, "拍摄失败 (facing=$facing)", e)
+            LogBuffer.log("E", TAG, "拍摄失败 facing=$facing: ${e.message}")
             CaptureResult.Failure("拍摄失败: ${e.message}", e)
         } finally {
-            release()
+            withContext(NonCancellable + Dispatchers.Main) { release() }
+            LogBuffer.log("I", TAG, "资源释放完成")
         }
     }
 
@@ -128,10 +137,12 @@ class CameraXController(
      */
     private suspend fun takePictureAndDecode(): Bitmap =
         suspendCancellableCoroutine { cont ->
+            LogBuffer.log("I", TAG, "takePicture 调用")
             imageCapture?.takePicture(
                 ContextCompat.getMainExecutor(context),
                 object : ImageCapture.OnImageCapturedCallback() {
                     override fun onCaptureSuccess(image: ImageProxy) {
+                        LogBuffer.log("I", TAG, "onCaptureSuccess 回调")
                         if (!cont.isActive) {
                             image.close()
                             return
@@ -143,10 +154,14 @@ class CameraXController(
                     }
 
                     override fun onError(exception: ImageCaptureException) {
+                        LogBuffer.log("E", TAG, "onError 回调: ${exception.message}")
                         if (cont.isActive) cont.cancel(exception)
                     }
                 }
-            )
+            ) ?: run {
+                LogBuffer.log("E", TAG, "imageCapture 为 null，无法拍照")
+                cont.cancel(IllegalStateException("imageCapture 未初始化"))
+            }
         }
 
     /**
@@ -183,6 +198,7 @@ class CameraXController(
     }
 
     override fun release() {
+        LogBuffer.log("I", TAG, "release: unbind + 清理")
         cameraProvider?.unbindAll()
         cameraProvider = null
         imageCapture = null
