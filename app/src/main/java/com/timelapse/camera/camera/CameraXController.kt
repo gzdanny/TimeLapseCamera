@@ -220,16 +220,24 @@ class CameraXController(
      */
     private fun getMaxJpegSize(facing: Int): Size {
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        LogBuffer.log("I", TAG, "getMaxJpegSize: 查找 facing=$facing 的最高分辨率")
         for (id in cameraManager.cameraIdList) {
             val chars = cameraManager.getCameraCharacteristics(id)
-            if (chars.get(CameraCharacteristics.LENS_FACING) == facing) {
+            val actualFacing = chars.get(CameraCharacteristics.LENS_FACING)
+            LogBuffer.log("I", TAG, "  camera[$id] facing=$actualFacing (目标=$facing) 匹配=${actualFacing == facing}")
+            if (actualFacing == facing) {
                 val configs = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
                 val sizes = configs?.getOutputSizes(ImageFormat.JPEG)
                 if (!sizes.isNullOrEmpty()) {
-                    return sizes.maxByOrNull { it.width * it.height }!!
+                    val maxSize = sizes.maxByOrNull { it.width * it.height }!!
+                    LogBuffer.log("I", TAG, "  → 找到最高分辨率: ${maxSize.width}x${maxSize.height}")
+                    return maxSize
+                } else {
+                    LogBuffer.log("I", TAG, "  → 无 JPEG 输出尺寸")
                 }
             }
         }
+        LogBuffer.log("W", TAG, "未找到匹配摄像头，使用兜底分辨率 4032x3024")
         // 兜底：4032x3024（12MP）
         return Size(4032, 3024)
     }
