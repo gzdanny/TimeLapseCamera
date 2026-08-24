@@ -13,6 +13,8 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -104,14 +106,23 @@ class CameraXController(
                 lifecycleRegistry = LifecycleRegistry(owner).apply { currentState = Lifecycle.State.RESUMED }
                 lifecycleOwner = owner
 
-                // 查所选摄像头的最高 JPEG 分辨率，主动设置给 ImageCapture
-                // （CameraX 默认不选最高，需要手动指定）
+                // 查所选摄像头的最高 JPEG 分辨率，用 ResolutionSelector 精确指定
+                // （setTargetResolution 已废弃，且在部分设备上选到错误分辨率）
                 val maxSize = getMaxJpegSize(facing)
                 LogBuffer.log("I", TAG, "目标分辨率: ${maxSize.width}x${maxSize.height}")
 
+                val resolutionSelector = ResolutionSelector.Builder()
+                    .setResolutionStrategy(
+                        ResolutionStrategy(
+                            maxSize,
+                            ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                        )
+                    )
+                    .build()
+
                 val capture = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-                    .setTargetResolution(maxSize)
+                    .setResolutionSelector(resolutionSelector)
                     .setJpegQuality(90)
                     .setTargetRotation(android.view.Surface.ROTATION_0)
                     .build()
