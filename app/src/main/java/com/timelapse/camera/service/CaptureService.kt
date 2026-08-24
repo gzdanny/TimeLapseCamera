@@ -31,6 +31,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -136,6 +137,7 @@ class CaptureService : Service() {
     private suspend fun captureLoop() {
         try {
             while (true) {
+              try {
                 var config = CaptureConfig.load(applicationContext)
                 LogBuffer.log("I", TAG, "循环开始, isRunning=${config.isRunning}")
                 if (!config.isRunning) break
@@ -231,6 +233,12 @@ class CaptureService : Service() {
                 // ── 5. 协程等待（主调度，间隔期不持 WakeLock）──
                 LogBuffer.log("I", TAG, "等待 ${nextDelay}s 后进入下一轮")
                 delay(nextDelay * 1000L)
+              } catch (e: CancellationException) {
+                  throw e
+              } catch (e: Throwable) {
+                  LogBuffer.log("E", TAG, "拍摄循环异常: ${e.javaClass.simpleName}: ${e.message}")
+                  delay(5000)
+              }
             }
         } finally {
             withContext(NonCancellable) {

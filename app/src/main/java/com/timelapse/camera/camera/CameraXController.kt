@@ -132,19 +132,40 @@ class CameraXController(
                 // 按 cameraId 精确选择摄像头
                 val cameraSelector = CameraSelector.Builder()
                     .addCameraFilter { cameraInfos ->
-                        cameraInfos.filter { info ->
+                        val allIds = cameraInfos.map {
+                            runCatching { Camera2CameraInfo.from(it).cameraId }.getOrNull() ?: "?"
+                        }
+                        LogBuffer.log("I", TAG, "CameraX 可用摄像头: $allIds, 目标=$id")
+
+                        val filtered = cameraInfos.filter { info ->
                             val camera2Info = Camera2CameraInfo.from(info)
-                            camera2Info.cameraId == id
+                            val matchId = camera2Info.cameraId == id
+                            LogBuffer.log("I", TAG, "  摄像头 ${camera2Info.cameraId} 匹配=$matchId")
+                            matchId
+                        }
+
+                        if (filtered.isEmpty()) {
+                            LogBuffer.log("W", TAG, "CameraFilter 未匹配到 cameraId=$id，使用全部可用摄像头")
+                            cameraInfos
+                        } else {
+                            filtered
                         }
                     }
                     .build()
 
                 provider.unbindAll()
-                provider.bindToLifecycle(lifecycleOwner!!, cameraSelector, capture)
-                LogBuffer.log("I", TAG, "ImageCapture 绑定成功")
+                val boundCamera = provider.bindToLifecycle(lifecycleOwner!!, cameraSelector, capture)
+                val actualId = runCatching {
+                    Camera2CameraInfo.from(boundCamera.cameraInfo).cameraId
+                }.getOrNull() ?: "?"
+                LogBuffer.log("I", TAG, "ImageCapture 绑定成功, 实际摄像头=$actualId")
 
                 val bmp = takePictureAndDecode()
                 LogBuffer.log("I", TAG, "拍照解码成功 ${bmp.width}x${bmp.height}")
+                // 采样像素确认内容不是全白/全黑
+                val centerPixel = bmp.getPixel(bmp.width / 2, bmp.height / 2)
+                val cornerPixel = bmp.getPixel(10, 10)
+                LogBuffer.log("I", TAG, "像素采样: 中心=#${Integer.toHexString(centerPixel)}, 角落=#${Integer.toHexString(cornerPixel)}")
                 bmp
             }
 
