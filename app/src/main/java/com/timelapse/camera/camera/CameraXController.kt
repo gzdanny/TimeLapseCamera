@@ -15,6 +15,8 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -107,13 +109,21 @@ class CameraXController(
                 lifecycleOwner = owner
 
                 // 获取当前设备旋转角（用于 setTargetRotation，确保 EXIF 方向正确）
-                // 不手动指定 ResolutionSelector：CAPTURE_MODE_MAXIMIZE_QUALITY 本身就会自动
-                // 选该摄像头支持的最高分辨率，手动指定反而会因为尺寸不完全匹配而触发降级。
                 val (_, currentRotation) = getAdjustedSizeAndRotation(id)
                 LogBuffer.log("I", TAG, "目标旋转角=${currentRotation}")
 
+                // HIGHEST_AVAILABLE_STRATEGY：始终选择该摄像头支持的最高分辨率，不主动降级。
+                // PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE：分辨率优先于帧率。
+                val resolutionSelector = ResolutionSelector.Builder()
+                    .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+                    .setAllowedResolutionMode(
+                        ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE
+                    )
+                    .build()
+
                 val capture = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                    .setResolutionSelector(resolutionSelector)
                     .setJpegQuality(90)
                     .setTargetRotation(currentRotation)
                     .build()
