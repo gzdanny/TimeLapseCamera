@@ -208,7 +208,7 @@ ImageCapture.Builder()
 | `FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER` | 先找更低一档，找不到才用更高的 |
 | `FALLBACK_RULE_CLOSEST_LOWER` | 只找更低一档 |
 
-本项目使用 `FALLBACK_RULE_NONE` 确保不会悄悄降级到次一档分辨率，出问题时应明确报错而非拍出低质量图片。
+本项目使用 `FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER`：找不到精确匹配时找最接近的高一档，再找不到才用低一档。避免 `FALLBACK_RULE_NONE` 因 aspect ratio 不匹配而直接报错导致拍摄失败。
 
 这就是为什么 `CameraXController.kt` 中有 `getAdjustedSizeAndRotation()` 方法，它读取旋转角传给 `setTargetRotation()`——CameraX 收到正确的旋转角后会自动处理尺寸映射，不需要在 Java 层手动对调长宽。
 
