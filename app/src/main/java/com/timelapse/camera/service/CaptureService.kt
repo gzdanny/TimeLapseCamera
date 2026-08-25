@@ -113,6 +113,9 @@ class CaptureService : Service() {
                 if (!config.isRunning) {
                     config.copy(isRunning = true).save(applicationContext)
                 }
+                // 区分启动来源：lastCaptureTime==0 说明是闹钟/Watchdog 唤醒后的重启，否则是正常启动
+                val restartSource = if (config.lastCaptureTime == 0L) "闹钟重启" else "正常启动"
+                LogBuffer.log("I", TAG, "服务启动 [来源=$restartSource]，间隔 ${config.intervalSeconds}s")
                 val initialDelay = if (config.lastRemoteInterval > 0)
                     config.lastRemoteInterval else config.intervalSeconds
                 startForeground(NOTIFICATION_ID, buildNotification(initialDelay))
@@ -235,7 +238,7 @@ class CaptureService : Service() {
                 CaptureScheduler.get(this).scheduleNext(nextDelay)
 
                 // ── 5. 协程等待（主调度，WakeLock 全程持有防息屏秒睡）──
-                LogBuffer.log("I", TAG, "等待 ${nextDelay}s 后进入下一轮")
+                LogBuffer.log("I", TAG, "等待 ${nextDelay}s 后进入下一轮（正常定时器）")
                 delay(nextDelay * 1000L)
               } catch (e: CancellationException) {
                   throw e

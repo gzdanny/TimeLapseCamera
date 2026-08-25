@@ -5,6 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import com.timelapse.camera.service.CaptureService
+import com.timelapse.camera.util.LogBuffer
+
+private const val TAG = "CaptureReceiver"
 
 /**
  * 闹钟备份接收器 —— AlarmManager 备份闹钟到期时触发，重启拍摄服务。
@@ -21,6 +24,8 @@ class CaptureReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent?.action != CaptureScheduler.ACTION_TRIGGER_CAPTURE) return
+
+        LogBuffer.log("I", TAG, "闹钟触发 → 启动 CaptureService")
 
         val serviceIntent = Intent(context, CaptureService::class.java).apply {
             action = CaptureService.ACTION_START

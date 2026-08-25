@@ -65,7 +65,7 @@ class WatchdogService : Service() {
             while (isActive) {
                 delay(CHECK_INTERVAL_MS)
                 if (!isMainServiceRunning()) {
-                    LogBuffer.log("W", TAG, "主服务进程未运行，尝试重启")
+                    LogBuffer.log("W", TAG, "主服务进程未运行，Watchdog 触发重启闹钟")
                     // 设一个 5 秒后的闹钟，触发 CaptureReceiver → 重启主服务
                     CaptureScheduler.get(this@WatchdogService).scheduleNext(5)
                 } else {
