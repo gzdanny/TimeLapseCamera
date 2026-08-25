@@ -104,9 +104,13 @@ class CameraXController(
                 lifecycleRegistry = LifecycleRegistry(owner).apply { currentState = Lifecycle.State.RESUMED }
                 lifecycleOwner = owner
 
+                // 1. 获取该镜头物理传感器的最高 JPEG 输出尺寸（通过底层 Camera2 API）
                 val rawMaxSize = getMaxJpegSize(id)
                 val currentRotation = getRotation(context)
 
+                // 2. 直接用 rawMaxSize，不手动对调长宽：CameraX 的 setTargetRotation 会内部处理旋转映射
+                //    之前曾尝试手动对调，结果触发了 "No available output size" 错误
+                //    正确做法：传 rawSize + setTargetRotation(rotation)，CameraX 自行计算
                 val resolutionSelector = ResolutionSelector.Builder()
                     .setResolutionStrategy(
                         ResolutionStrategy(rawMaxSize, ResolutionStrategy.FALLBACK_RULE_NONE)
@@ -116,14 +120,16 @@ class CameraXController(
                     )
                     .build()
 
+                // 3. 组装 ImageCapture
                 val capture = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                     .setResolutionSelector(resolutionSelector)
                     .setJpegQuality(90)
-                    .setTargetRotation(currentRotation)
+                    .setTargetRotation(currentRotation)  // ← 关键：告诉 CameraX 当前设备方向
                     .build()
                 imageCapture = capture
 
+                // 4. 按 cameraId 精确选择摄像头（CameraFilter 是 CameraX 精确选择摄像头的正确方式）
                 val cameraSelector = CameraSelector.Builder()
                     .addCameraFilter { cameraInfos ->
                         cameraInfos.filter { info ->

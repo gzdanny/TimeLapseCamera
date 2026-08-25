@@ -11,6 +11,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.timelapse.camera.R
+import com.timelapse.camera.config.CaptureConfig
 import com.timelapse.camera.scheduler.CaptureScheduler
 import com.timelapse.camera.util.LogBuffer
 import kotlinx.coroutines.CoroutineScope
@@ -63,16 +64,23 @@ class WatchdogService : Service() {
 
     /**
      * 每 60s 检查一次主服务进程是否存活。
-     * 如果主进程已死，重新注册拍摄闹钟（5秒后）以触发服务重启。
+     * 如果主进程已死且配置中 isRunning=true，重新注册拍摄闹钟（5秒后）以触发服务重启。
+     * 注意：只在用户主动开始拍摄（isRunning=true）时才触发重启，避免 App 刚启动就自动拍摄。
      */
     private fun startCheckLoop() {
         checkJob = serviceScope.launch(Dispatchers.Default) {
             while (isActive) {
                 delay(CHECK_INTERVAL_MS)
                 if (!isMainServiceRunning()) {
-                    LogBuffer.log("W", TAG, "主服务进程未运行，Watchdog 触发重启闹钟")
-                    // 设一个 5 秒后的闹钟，触发 CaptureReceiver → 重启主服务
-                    CaptureScheduler.get(this@WatchdogService).scheduleNext(5)
+                    // 只有用户在设置中开启了拍摄（isRunning=true），才需要重启
+                    val config = CaptureConfig.load(this@WatchdogService)
+                    if (config.isRunning) {
+                        LogBuffer.log("W", TAG, "主服务进程未运行，Watchdog 触发重启闹钟")
+                        // 设一个 5 秒后的闹钟，触发 CaptureReceiver → 重启主服务
+                        CaptureScheduler.get(this@WatchdogService).scheduleNext(5)
+                    } else {
+                        LogBuffer.log("I", TAG, "主服务未运行，isRunning=false，不重启")
+                    }
                 } else {
                     LogBuffer.log("I", TAG, "主服务运行正常")
                 }
