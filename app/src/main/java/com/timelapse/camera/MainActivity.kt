@@ -3,12 +3,15 @@ package com.timelapse.camera
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import com.timelapse.camera.camera.CameraEnumerator
 import com.timelapse.camera.databinding.ActivityMainBinding
 import com.timelapse.camera.ui.gallery.GalleryFragment
 import com.timelapse.camera.ui.preview.PreviewFragment
 import com.timelapse.camera.ui.settings.SettingsFragment
 import com.timelapse.camera.ui.status.StatusFragment
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * 主 Activity —— 底部导航 + 4 个 Fragment 切换。

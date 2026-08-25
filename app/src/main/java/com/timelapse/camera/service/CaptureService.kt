@@ -173,6 +173,7 @@ class CaptureService : Service() {
                 // ── 2. 拍摄 ──
                 // WakeLock 已由服务启动时持有（防止息屏秒睡），此处只需正常拍摄
                 val timestamp = System.currentTimeMillis()
+                var bitmapToSave: Bitmap? = null
                 try {
                     LogBuffer.log("I", TAG, "开始拍摄 #${config.captureCount + 1}")
                     val camera: ICameraController = CameraXController(applicationContext, config.cameraId)
@@ -186,7 +187,7 @@ class CaptureService : Service() {
                             config.watermarkShowStorage ||
                             config.watermarkShowTemperature
 
-                    val bitmapToSave = when (result) {
+                    bitmapToSave = when (result) {
                         is CaptureResult.Success -> {
                             if (hasWatermark) {
                                 LogBuffer.log("I", TAG, "开始水印处理")
@@ -206,7 +207,7 @@ class CaptureService : Service() {
                     // 写入磁盘也可能失败（磁盘满、IO 错误等）
                     // 失败了就打 Log，不崩溃，等下一轮继续（释放资源是关键）
                     runCatching {
-                        storage.save(bitmapToSave, timestamp)
+                        storage.save(bitmapToSave!!, timestamp)
                     }.onSuccess {
                         if (result is CaptureResult.Success) {
                             config = config.copy(
@@ -223,7 +224,7 @@ class CaptureService : Service() {
                     }
                 } finally {
                     // Bitmap 生命周期闭环：无论成功/失败/异常，统一回收，杜绝双重回收或泄漏
-                    bitmapToSave.recycle()
+                    bitmapToSave?.recycle()
                 }
 
                 // ── 3. 更新倒计时通知（系统自动渲染，零功耗）──

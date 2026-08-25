@@ -74,7 +74,7 @@ class CaptureScheduler private constructor(private val context: Context) {
             alarmManager.setAndAllowWhileIdle(
                 AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pendingIntent
             )
-            LogBuffer.log("W", TAG, "精确闹钟被拒绝，退化为非精确闹钟", e)
+            LogBuffer.log("W", TAG, "精确闹钟被拒绝，退化为非精确闹钟: ${e.message}")
         }
 
         LogBuffer.log("I", TAG, "已安排下次拍摄：${delaySeconds}秒后（elapsedRealtime=${triggerAt}ms）")
