@@ -238,7 +238,6 @@ class CaptureService : Service() {
                 CaptureScheduler.get(this).scheduleNext(nextDelay)
 
                 // ── 5. 协程等待（主调度，WakeLock 全程持有防息屏秒睡）──
-                LogBuffer.log("I", TAG, "等待 ${nextDelay}s 后进入下一轮（正常定时器）")
                 delay(nextDelay * 1000L)
               } catch (e: CancellationException) {
                   throw e

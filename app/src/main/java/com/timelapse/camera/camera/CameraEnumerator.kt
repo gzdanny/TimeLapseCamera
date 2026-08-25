@@ -56,9 +56,6 @@ object CameraEnumerator {
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val cameraIds = cameraManager.cameraIdList
 
-        LogBuffer.log("I", TAG, "===== 摄像头枚举开始 =====")
-        LogBuffer.log("I", TAG, "设备共有 ${cameraIds.size} 个摄像头")
-
         val result = mutableListOf<CameraInfo>()
 
         for (id in cameraIds) {
@@ -75,9 +72,7 @@ object CameraEnumerator {
                 }
 
                 val sensorSize = chars.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
-
                 val focalLengths = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-
                 val jpegSizes = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
                     ?.getOutputSizes(ImageFormat.JPEG)
                     ?.sortedByDescending { it.width * it.height }
@@ -85,19 +80,12 @@ object CameraEnumerator {
 
                 val info = CameraInfo(id, facing, facingName, sensorSize, focalLengths, jpegSizes)
                 result.add(info)
-
-                // 打印概要（一行搞定，不刷屏）
-                val sensorInfo = sensorSize?.let { "${it.width}x${it.height}" } ?: "未知"
-                LogBuffer.log(
-                    "I", TAG,
-                    "[$id] $facingName | ${info.megapixels} | 传感器: $sensorInfo | 焦距: ${info.focalLengthText}"
-                )
+                LogBuffer.log("I", TAG, "[$id] $facingName | ${info.megapixels} | 传感器: ${sensorSize?.let { "${it.width}x${it.height}" } ?: "未知"} | 焦距: ${info.focalLengthText}")
             }.onFailure { e ->
-                LogBuffer.log("E", TAG, "读取摄像头 $id 信息失败: ${e.message}")
+                LogBuffer.log("E", TAG, "读取摄像头 $id 失败: ${e.message}")
             }
         }
 
-        LogBuffer.log("I", TAG, "===== 摄像头枚举结束 =====")
         return result
     }
 

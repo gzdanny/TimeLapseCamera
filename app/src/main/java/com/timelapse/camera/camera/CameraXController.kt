@@ -94,12 +94,9 @@ class CameraXController(
      */
     private suspend fun captureWithCameraId(id: String): CaptureResult {
         return try {
-            LogBuffer.log("I", TAG, "captureWithCameraId 开始, id=$id")
-
             val bitmap = withContext(Dispatchers.Main) {
                 val provider = ProcessCameraProvider.getInstance(context).await()
                 cameraProvider = provider
-                LogBuffer.log("I", TAG, "Provider 获取成功")
 
                 val owner = object : LifecycleOwner {
                     override val lifecycle: Lifecycle get() = lifecycleRegistry!!
@@ -107,14 +104,9 @@ class CameraXController(
                 lifecycleRegistry = LifecycleRegistry(owner).apply { currentState = Lifecycle.State.RESUMED }
                 lifecycleOwner = owner
 
-                // 1. 获取该镜头物理传感器的最大原生尺寸
                 val rawMaxSize = getMaxJpegSize(id)
                 val currentRotation = getRotation(context)
 
-                // 2. 直接用 rawMaxSize，不手动对调长宽：CameraX 的 setTargetRotation 会内部处理旋转映射
-                LogBuffer.log("I", TAG, "目标分辨率: ${rawMaxSize.width}x${rawMaxSize.height}, 旋转=${currentRotation}")
-
-                // 3. 用 FALLBACK_RULE_NONE 封死降级，找不到精确匹配直接报错
                 val resolutionSelector = ResolutionSelector.Builder()
                     .setResolutionStrategy(
                         ResolutionStrategy(rawMaxSize, ResolutionStrategy.FALLBACK_RULE_NONE)
@@ -124,7 +116,6 @@ class CameraXController(
                     )
                     .build()
 
-                // 4. 组装 ImageCapture
                 val capture = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                     .setResolutionSelector(resolutionSelector)
@@ -133,49 +124,27 @@ class CameraXController(
                     .build()
                 imageCapture = capture
 
-                // 按 cameraId 精确选择摄像头
                 val cameraSelector = CameraSelector.Builder()
                     .addCameraFilter { cameraInfos ->
-                        val allIds = cameraInfos.map {
-                            runCatching { Camera2CameraInfo.from(it).cameraId }.getOrNull() ?: "?"
-                        }
-                        LogBuffer.log("I", TAG, "CameraX 可用摄像头: $allIds, 目标=$id")
-
-                        val filtered = cameraInfos.filter { info ->
+                        cameraInfos.filter { info ->
                             val camera2Info = Camera2CameraInfo.from(info)
-                            val matchId = camera2Info.cameraId == id
-                            LogBuffer.log("I", TAG, "  摄像头 ${camera2Info.cameraId} 匹配=$matchId")
-                            matchId
-                        }
-
-                        if (filtered.isEmpty()) {
-                            LogBuffer.log("W", TAG, "CameraFilter 未匹配到 cameraId=$id，使用全部可用摄像头")
-                            cameraInfos
-                        } else {
-                            filtered
-                        }
+                            camera2Info.cameraId == id
+                        }.ifEmpty { cameraInfos }
                     }
                     .build()
 
                 provider.unbindAll()
-                val boundCamera = provider.bindToLifecycle(lifecycleOwner!!, cameraSelector, capture)
-                val actualId = runCatching {
-                    Camera2CameraInfo.from(boundCamera.cameraInfo).cameraId
-                }.getOrNull() ?: "?"
-                LogBuffer.log("I", TAG, "ImageCapture 绑定成功, 实际摄像头=$actualId")
+                provider.bindToLifecycle(lifecycleOwner!!, cameraSelector, capture)
 
-                val bmp = takePictureAndDecode()
-                LogBuffer.log("I", TAG, "拍照解码成功 ${bmp.width}x${bmp.height}")
-                bmp
+                takePictureAndDecode()
             }
 
             CaptureResult.Success(bitmap, System.currentTimeMillis())
         } catch (e: Throwable) {
-            LogBuffer.log("E", TAG, "拍摄失败 id=$id: ${e.javaClass.simpleName}: ${e.message}")
+            LogBuffer.log("E", TAG, "拍摄失败: ${e.javaClass.simpleName}: ${e.message}")
             CaptureResult.Failure("拍摄失败: ${e.message}", e as? Exception ?: RuntimeException(e))
         } finally {
             withContext(Dispatchers.Main) { release() }
-            LogBuffer.log("I", TAG, "资源释放完成")
         }
     }
 
@@ -266,9 +235,7 @@ class CameraXController(
      */
     private fun getRotation(context: Context): Int {
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val rotation = wm.defaultDisplay.rotation
-        LogBuffer.log("I", TAG, "设备旋转角=${rotation}")
-        return rotation
+        return wm.defaultDisplay.rotation
     }
 
     /**
@@ -291,7 +258,6 @@ class CameraXController(
     }
 
     override fun release() {
-        LogBuffer.log("I", TAG, "release: unbind + 清理")
         cameraProvider?.unbindAll()
         cameraProvider = null
         imageCapture = null
