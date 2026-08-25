@@ -39,7 +39,7 @@ class WatchdogService : Service() {
         private const val CHECK_INTERVAL_MS = 60_000L // 每 60s 检查一次
     }
 
-    private val serviceScope = MainScope()
+    private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var checkJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
