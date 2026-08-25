@@ -255,33 +255,14 @@ class CameraXController(
     }
 
     /**
-     * 获取当前设备旋转角。
-     *
-     * 关于分辨率的说明：
-     * - getOutputSizes(JPEG) 返回的是传感器自然方向的尺寸（后置通常是横向 16:9）
-     * - 传给 CameraX 时直接传 rawSize，设置 setTargetRotation(rotation)
-     * - CameraX 内部会自动处理旋转映射（如 ROTATION_90 时自行交换宽高），
-     *   不需要在 Java 层手动对调长宽。手动对调反而会导致 aspect ratio 与
-     *   传感器实际输出不匹配，触发 no available output size 错误。
-     *
-     * 返回值：Pair<Size, Int>，Size 是 rawSize（未对调），Int 是当前 surface 旋转角
+     * 获取当前设备屏幕旋转角（0/90/180/270），用于 setTargetRotation。
+     * CameraX 收到正确的 targetRotation 后会自动处理尺寸映射，不需要手动对调 SensorSize。
      */
-    private fun getAdjustedSizeAndRotation(cameraId: String): Pair<Size, Int> {
-        val rawSize = getMaxJpegSize(cameraId)
-
-        // 获取当前屏幕旋转角（0/90/180/270）
+    private fun getRotation(context: Context): Int {
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val rotation = wm.defaultDisplay.rotation
-
-        // 竖屏时（90° 或 270°），传感器原图的"宽"变成实际的"高"，"高"变成实际的"宽"
-        val adjustedSize = if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
-            Size(rawSize.height, rawSize.width)
-        } else {
-            rawSize
-        }
-
-        LogBuffer.log("I", TAG, "设备旋转角=${rotation}, 原始=${rawSize.width}x${rawSize.height}, 调整后=${adjustedSize.width}x${adjustedSize.height}")
-        return Pair(adjustedSize, rotation)
+        LogBuffer.log("I", TAG, "设备旋转角=${rotation}")
+        return rotation
     }
 
     /**
