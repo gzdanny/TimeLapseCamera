@@ -41,7 +41,7 @@ data class CaptureConfig(
     /** 水印是否显示剩余存储 */
     val watermarkShowStorage: Boolean = true,
     /** 水印是否显示电池温度 */
-    val watermarkShowTemperature: Boolean = false,
+    val watermarkShowTemperature: Boolean = true,
     /** 远程配置 URL，返回 15-3600 整数作为下次拍摄延迟，null 表示不使用远程配置 */
     val remoteConfigUrl: String? = null,
     /** 拍摄是否正在运行 */
