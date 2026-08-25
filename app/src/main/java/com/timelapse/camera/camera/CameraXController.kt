@@ -112,8 +112,8 @@ class CameraXController(
                 val (adjustedSize, currentRotation) = getAdjustedSizeAndRotation(id)
                 LogBuffer.log("I", TAG, "目标分辨率: ${adjustedSize.width}x${adjustedSize.height}, 旋转=${currentRotation}")
 
-                // HIGHEST_AVAILABLE_STRATEGY + FALLBACK_RULE_NONE：
-                // 选最高分辨率，且当该分辨率不可用时拒绝自动降级到次一档（直接报错）。
+                // 指定目标分辨率 + FALLBACK_RULE_NONE：
+                // 精确锁定 adjustedSize，当该尺寸不可用时直接报错，拒绝自动降级到次一档。
                 // 配合 PREFER_HIGHER_RESOLUTION 确保帧率不会牺牲分辨率。
                 val resolutionSelector = ResolutionSelector.Builder()
                     .setResolutionStrategy(
