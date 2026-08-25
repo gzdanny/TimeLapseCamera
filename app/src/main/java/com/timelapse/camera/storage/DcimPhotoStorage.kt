@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -20,21 +21,25 @@ import java.util.Locale
 /**
  * DCIM 公共目录存储实现。
  *
- * 写入方式随 Android 版本演进（教学要点：Android 存储权限的历史变迁）：
- * - API 29+（Android 10+）：Scoped Storage 强制执行，必须用 MediaStore API 写入
+ * 写入策略（随 Android 版本演进）：
+ * - API 29+（Android 10+）：Scoped Storage 要求，用 MediaStore API 写入
+ *   • 先 insert() 得到 Uri，设置 IS_PENDING=1
+ *   • openOutputStream 写入图片
+ *   • update() 设置 IS_PENDING=0（部分设备需要 WRITE_EXTERNAL_STORAGE，失败时降级忽略）
  * - API 26-28（Android 8-9）：直接 File API + WRITE_EXTERNAL_STORAGE 权限
  *
- * 读取方式：全部用 File API。
- * Android 11+ 允许 App 直接用 File 路径访问自己通过 MediaStore 创建的文件。
- * Android 10 以下本来就支持直接访问 DCIM。
+ * 读取方式：全部用 File API（baseDir 是我们自己创建的用户可见目录）。
+ *
+ * 权限要求：
+ * - API 29+：MediaStore 写入不需要额外权限（系统处理）
+ * - API 26-28：需要 WRITE_EXTERNAL_STORAGE 权限
  *
  * 优势：卸载 App 后照片保留，系统相册可见。
- * 限制：App 卸载重装后，File API 可能无法访问旧文件（"创建者"标记丢失），
- * 但文件本身还在 DCIM 中，用户可用系统相册查看。
  */
 class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
 
     companion object {
+        private const val TAG = "DcimPhotoStorage"
         private const val SUB_DIR = "TimeLapse"
     }
 
@@ -54,7 +59,7 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
             .format(Date(timestamp)) + ".jpg"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            saveViaMediaStore(bitmap, fileName, monthDir, timestamp)
+            saveViaMediaStore(bitmap, fileName, monthDir)
         } else {
             saveViaFileApi(bitmap, fileName, monthDir)
         }
@@ -69,64 +74,19 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
         }
     }
 
-    private fun saveTestViaMediaStore(bitmap: Bitmap, fileName: String): String {
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/$SUB_DIR")
-            put(MediaStore.Images.Media.IS_PENDING, 1)
-        }
-
-        val collection = MediaStore.Images.Media.getContentUri(
-            MediaStore.VOLUME_EXTERNAL_PRIMARY
-        )
-        // 查找已有的 Test.jpg，有则覆盖，无则新建
-        val existingUri = findExistingTestUri(collection, fileName)
-        val uri = (existingUri ?: context.contentResolver.insert(collection, values))
-            ?: throw IOException("MediaStore insert 失败")
-
-        context.contentResolver.openOutputStream(uri)?.use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-        } ?: throw IOException("打开输出流失败")
-        // 不在这里 recycle：compress 已同步完成，bitmap 在 withContext 返回前一直有效
-        // 由 CaptureService 统一 recycle，避免双重回收崩溃
-
-        values.clear()
-        values.put(MediaStore.Images.Media.IS_PENDING, 0)
-        context.contentResolver.update(uri, values, null, null)
-
-        return getFilePathFromUri(uri) ?: uri.toString()
-    }
-
-    private fun saveTestViaFileApi(bitmap: Bitmap, fileName: String): String {
-        val file = File(baseDir, fileName)
-        FileOutputStream(file).use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-        }
-        // 不在这里 recycle，由 CaptureService 统一 recycle
-        return file.absolutePath
-    }
-
-    private fun findExistingTestUri(collection: Uri, fileName: String): Uri? {
-        val projection = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DISPLAY_NAME)
-        val selection = "${MediaStore.Images.Media.DISPLAY_NAME} = ?"
-        context.contentResolver.query(collection, projection, selection, arrayOf(fileName), null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val id = cursor.getLong(0)
-                return ContentUris.withAppendedId(collection, id)
-            }
-        }
-        return null
-    }
+    // ──────────── API 29+：MediaStore 写入 ────────────
 
     /**
-     * API 29+：通过 MediaStore 写入 DCIM。
+     * 通过 MediaStore 写入正式拍摄照片到 DCIM/TimeLapse/{yyyy-MM}/。
      *
-     * 流程：ContentResolver.insert() → 得到 Uri → openOutputStream → compress → 更新 IS_PENDING
-     * 无需任何存储权限。
+     * 流程：insert(IS_PENDING=1) → compress → update(IS_PENDING=0) → 返回路径
+     *
+     * IS_PENDING=0 这一步部分 Android 11+ 设备需要 WRITE_EXTERNAL_STORAGE 权限，
+     * 如果缺少权限只影响相册索引更新，不影响图片本身已写入。
+     * 捕获异常后降级返回，避免整个拍摄流程中断。
      */
     private fun saveViaMediaStore(
-        bitmap: Bitmap, fileName: String, monthDir: String, timestamp: Long
+        bitmap: Bitmap, fileName: String, monthDir: String
     ): String {
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
@@ -144,38 +104,97 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
         context.contentResolver.openOutputStream(uri)?.use { out ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
         } ?: throw IOException("打开输出流失败")
-        // 不在这里 recycle：compress 已同步完成，bitmap 在 withContext 返回前一直有效
-        // 由 CaptureService 统一 recycle，避免双重回收崩溃
+        // bitmap 由 CaptureService 统一 recycle，此处不回收
 
-        // 写入完成，更新 IS_PENDING 为 0，让文件对其他 App 可见
+        // IS_PENDING=0：通知媒体扫描器此文件可被系统相册索引
         values.clear()
         values.put(MediaStore.Images.Media.IS_PENDING, 0)
-        context.contentResolver.update(uri, values, null, null)
+        runCatching {
+            context.contentResolver.update(uri, values, null, null)
+        }.onFailure { e ->
+            Log.w(TAG, "IS_PENDING 更新失败（相册可能延迟显示）: ${e.message}")
+        }
 
-        // 从 Uri 获取 File 路径（用于返回值和后续 File API 读取）
+        // 返回路径：优先取 DATA 列，失败则返回 Uri 字符串（调用方只需识别是成功路径）
         return getFilePathFromUri(uri) ?: uri.toString()
     }
 
     /**
-     * API 26-28：直接用 File API 写入 DCIM。
-     * 需要 WRITE_EXTERNAL_STORAGE 权限（在 PermissionChecker 中检查）。
+     * 通过 MediaStore 写入试拍照片（固定文件名 Test.jpg，覆盖已有）。
+     * 查找已有 Test.jpg 并复用其 Uri，无则新建。
      */
-    private fun saveViaFileApi(
-        bitmap: Bitmap, fileName: String, monthDir: String
-    ): String {
+    private fun saveTestViaMediaStore(bitmap: Bitmap, fileName: String): String {
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "DCIM/$SUB_DIR")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+
+        val collection = MediaStore.Images.Media.getContentUri(
+            MediaStore.VOLUME_EXTERNAL_PRIMARY
+        )
+        val existingUri = findExistingTestUri(collection, fileName)
+        val uri = (existingUri ?: context.contentResolver.insert(collection, values))
+            ?: throw IOException("MediaStore insert 失败")
+
+        context.contentResolver.openOutputStream(uri)?.use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+        } ?: throw IOException("打开输出流失败")
+        // bitmap 由 CaptureService 统一 recycle
+
+        values.clear()
+        values.put(MediaStore.Images.Media.IS_PENDING, 0)
+        runCatching {
+            context.contentResolver.update(uri, values, null, null)
+        }.onFailure { e ->
+            Log.w(TAG, "IS_PENDING 更新失败（试拍）: ${e.message}")
+        }
+
+        return getFilePathFromUri(uri) ?: uri.toString()
+    }
+
+    // ──────────── API 26-28：File API 写入 ────────────
+
+    /**
+     * API 26-28：直接用 File API 写入 DCIM，需要 WRITE_EXTERNAL_STORAGE 权限。
+     */
+    private fun saveViaFileApi(bitmap: Bitmap, fileName: String, monthDir: String): String {
         val dir = File(baseDir, monthDir).apply { mkdirs() }
         val file = File(dir, fileName)
-
         FileOutputStream(file).use { out ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
         }
-        // 不在这里 recycle，由 CaptureService 统一 recycle
+        // bitmap 由 CaptureService 统一 recycle
         return file.absolutePath
     }
 
+    private fun saveTestViaFileApi(bitmap: Bitmap, fileName: String): String {
+        val file = File(baseDir, fileName)
+        FileOutputStream(file).use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+        }
+        // bitmap 由 CaptureService 统一 recycle
+        return file.absolutePath
+    }
+
+    // ──────────── 辅助方法 ────────────
+
+    private fun findExistingTestUri(collection: Uri, fileName: String): Uri? {
+        val projection = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DISPLAY_NAME)
+        val selection = "${MediaStore.Images.Media.DISPLAY_NAME} = ?"
+        context.contentResolver.query(collection, projection, selection, arrayOf(fileName), null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val id = cursor.getLong(0)
+                return ContentUris.withAppendedId(collection, id)
+            }
+        }
+        return null
+    }
+
     /**
-     * 从 MediaStore Uri 获取文件路径。
-     * DATA 列在 Android 10+ 标记为废弃但仍可返回路径（对自己创建的文件有效）。
+     * 从 MediaStore Uri 查询本地文件路径。
+     * DATA 列在 Android 10+ 标记为废弃，但对自己创建的文件仍有效。
      */
     private fun getFilePathFromUri(uri: Uri): String? {
         val projection = arrayOf(MediaStore.Images.Media.DATA)
@@ -188,7 +207,7 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
     }
 
     // ──────────── 读取操作：全部用 File API ────────────
-    // Android 11+ 允许 App 用 File 路径访问自己创建的文件。
+    // Android 11+ 允许 App 用 File 路径访问自己通过 MediaStore 创建的文件。
     // Android 10 以下本来就支持直接访问 DCIM。
 
     override fun getPhotoCount(): Int =
