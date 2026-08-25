@@ -7,7 +7,6 @@ import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.util.Size
-import android.view.Surface
 import android.view.WindowManager
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
@@ -110,10 +109,7 @@ class CameraXController(
 
                 // 获取当前设备旋转角（用于 setTargetRotation，确保 EXIF 方向正确）
                 val rawSize = getMaxJpegSize(id)
-                val (_, currentRotation) = getAdjustedSizeAndRotation(id)
-                // 直接传 rawSize，不手动对调长宽：CameraX 在指定 targetRotation 后会自动
-                // 处理旋转映射（如 ROTATION_90 时自行交换宽高），无需在 Java 层对调。
-                // 使用 FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER 防止找不到精确匹配时崩溃。
+                val currentRotation = getRotation(context)
                 LogBuffer.log("I", TAG, "目标分辨率: ${rawSize.width}x${rawSize.height}, 旋转=${currentRotation}")
 
                 val resolutionSelector = ResolutionSelector.Builder()
