@@ -109,23 +109,13 @@ class CameraXController(
                 lifecycleOwner = owner
 
                 // 获取当前设备旋转角（用于 setTargetRotation，确保 EXIF 方向正确）
-                val (adjustedSize, currentRotation) = getAdjustedSizeAndRotation(id)
-                LogBuffer.log("I", TAG, "目标分辨率: ${adjustedSize.width}x${adjustedSize.height}, 旋转=${currentRotation}")
-
-                // 用 FALLBACK_RULE_EXACTLY 严格禁止自动降级：找不到精确匹配直接抛异常，
-                // 不会被 CameraX 悄悄选到次一档分辨率。异常会被外层 catch 捕获并打 Log。
-                val resolutionSelector = ResolutionSelector.Builder()
-                    .setResolutionStrategy(
-                        ResolutionStrategy(
-                            adjustedSize,
-                            ResolutionStrategy.FALLBACK_RULE_EXACTLY
-                        )
-                    )
-                    .build()
+                // 不手动指定 ResolutionSelector：CAPTURE_MODE_MAXIMIZE_QUALITY 本身就会自动
+                // 选该摄像头支持的最高分辨率，手动指定反而会因为尺寸不完全匹配而触发降级。
+                val (_, currentRotation) = getAdjustedSizeAndRotation(id)
+                LogBuffer.log("I", TAG, "目标旋转角=${currentRotation}")
 
                 val capture = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-                    .setResolutionSelector(resolutionSelector)
                     .setJpegQuality(90)
                     .setTargetRotation(currentRotation)
                     .build()
