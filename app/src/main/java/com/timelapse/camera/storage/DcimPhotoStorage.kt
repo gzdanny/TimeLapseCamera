@@ -88,7 +88,8 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
         context.contentResolver.openOutputStream(uri)?.use { out ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
         } ?: throw IOException("打开输出流失败")
-        bitmap.recycle()
+        // 不在这里 recycle：compress 已同步完成，bitmap 在 withContext 返回前一直有效
+        // 由 CaptureService 统一 recycle，避免双重回收崩溃
 
         values.clear()
         values.put(MediaStore.Images.Media.IS_PENDING, 0)
@@ -102,7 +103,7 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
         FileOutputStream(file).use { out ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
         }
-        bitmap.recycle()
+        // 不在这里 recycle，由 CaptureService 统一 recycle
         return file.absolutePath
     }
 
@@ -143,7 +144,8 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
         context.contentResolver.openOutputStream(uri)?.use { out ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
         } ?: throw IOException("打开输出流失败")
-        bitmap.recycle()
+        // 不在这里 recycle：compress 已同步完成，bitmap 在 withContext 返回前一直有效
+        // 由 CaptureService 统一 recycle，避免双重回收崩溃
 
         // 写入完成，更新 IS_PENDING 为 0，让文件对其他 App 可见
         values.clear()
@@ -167,8 +169,7 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
         FileOutputStream(file).use { out ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
         }
-        bitmap.recycle()
-
+        // 不在这里 recycle，由 CaptureService 统一 recycle
         return file.absolutePath
     }
 

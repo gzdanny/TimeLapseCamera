@@ -213,9 +213,10 @@ class CaptureService : Service() {
                         }
                     }.onFailure { e ->
                         LogBuffer.log("E", TAG, "写入磁盘失败: ${e.message}")
-                        bitmapToSave.recycle()
                     }
                 } finally {
+                    // Bitmap 生命周期闭环：无论成功/失败/异常，统一回收，杜绝双重回收或泄漏
+                    bitmapToSave.recycle()
                     releaseWakeLock()
                 }
 

@@ -52,7 +52,7 @@ class LocalPhotoStorage(
         FileOutputStream(file).use { out ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
         }
-        bitmap.recycle()
+        // 不在 save() 内 recycle，由调用方（CaptureService）统一管理 Bitmap 生命周期
 
         file.absolutePath
     }
@@ -62,7 +62,7 @@ class LocalPhotoStorage(
         FileOutputStream(file).use { out ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
         }
-        bitmap.recycle()
+        // 不在 save() 内 recycle，由调用方（CaptureService）统一管理 Bitmap 生命周期
         file.absolutePath
     }
 
