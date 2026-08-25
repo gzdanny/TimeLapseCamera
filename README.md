@@ -158,18 +158,18 @@ CameraX 底层就是 Camera2，功能完全一致，但代码量减少 40%+，
 
 #### ⚠️ CameraX 的旋转与分辨率陷阱
 
-本项目实际测试时发现：**"ROTATION_0 + EXIF 方向"的方案在某些设备上会出错**，导致照片出现裁切或尺寸异常。根因是 Android 的系统设计坑：
+本项目实际测试时发现：**手动对调传感器尺寸会导致"no available output size"错误**。根因是 Android 系统设计坑：
 
 ```
-getOutputSizes(JPEG) 返回的是传感器的"自然方向"尺寸
-  - 后置摄像头：通常是横向（如 4208×3120）
-  - 前置摄像头：通常是纵向（如 3264×2448）
+SENSOR_INFO_PIXEL_ARRAY_SIZE（传感器物理尺寸）≠ getOutputSizes(JPEG)（JPEG输出能力）
+  - 传感器：4208×3120（13.1MP，硬件像素阵列）
+  - CameraX JPEG 最大输出：3840×2160（4K，受限于 Camera HAL 抽象层）
 
-但如果 targetRotation = ROTATION_0（横向），而用户实际是竖屏使用：
-  → CameraX 输出 4208×3120 的水平图
-  → 系统相册按 EXIF 旋转 90° 后，用户看到的是竖构图
-  → 但部分国产 ROM 的 CameraX 实现无法正确写入 EXIF 方向信息
-  → 结果：照片被强制裁切成错误的宽高比
+之前的错误做法：把 rawSize 按旋转角对调后传入 CameraX
+  → 竖屏时传入 3120×4208（4:3），但摄像头实际只支持 16:9 输出
+  → CameraX 找不到匹配，抛出 "No available output size" 异常
+
+正确做法：直接传 rawSize（不做对调），靠 setTargetRotation 让 CameraX 自行处理旋转映射：
 ```
 
 **正确做法**：每次拍摄前动态读取设备旋转角，并将 `targetRotation` 设为当前角，同时根据旋转角对调分辨率的长宽：
@@ -210,8 +210,9 @@ ImageCapture.Builder()
 
 本项目使用 `FALLBACK_RULE_NONE` 确保不会悄悄降级到次一档分辨率，出问题时应明确报错而非拍出低质量图片。
 
-这就是为什么 `CameraXController.kt` 中有 `getAdjustedSizeAndRotation()` 方法，
-它实时读取旋转角并调整目标分辨率——确保无论手机怎么转，输出都是正确的尺寸。
+这就是为什么 `CameraXController.kt` 中有 `getAdjustedSizeAndRotation()` 方法，它读取旋转角传给 `setTargetRotation()`——CameraX 收到正确的旋转角后会自动处理尺寸映射，不需要在 Java 层手动对调长宽。
+
+**关于分辨率的补充说明**：系统相机 App 能拍出 4208×3120，是因为它使用厂商私有 API 绕过 CameraX 的限制。CameraX 通过标准 API 获取的 JPEG 最大输出尺寸为 3840×2160（4K），这是硬件抽象层的正常表现，不影响实际使用效果。
 
 ### 3. 水印为什么加电量/存储/温度？
 
