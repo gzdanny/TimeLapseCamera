@@ -109,13 +109,16 @@ class CameraXController(
                 lifecycleOwner = owner
 
                 // 获取当前设备旋转角（用于 setTargetRotation，确保 EXIF 方向正确）
-                val (_, currentRotation) = getAdjustedSizeAndRotation(id)
-                LogBuffer.log("I", TAG, "目标旋转角=${currentRotation}")
+                val (adjustedSize, currentRotation) = getAdjustedSizeAndRotation(id)
+                LogBuffer.log("I", TAG, "目标分辨率: ${adjustedSize.width}x${adjustedSize.height}, 旋转=${currentRotation}")
 
-                // HIGHEST_AVAILABLE_STRATEGY：始终选择该摄像头支持的最高分辨率，不主动降级。
-                // PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE：分辨率优先于帧率。
+                // HIGHEST_AVAILABLE_STRATEGY + FALLBACK_RULE_NONE：
+                // 选最高分辨率，且当该分辨率不可用时拒绝自动降级到次一档（直接报错）。
+                // 配合 PREFER_HIGHER_RESOLUTION 确保帧率不会牺牲分辨率。
                 val resolutionSelector = ResolutionSelector.Builder()
-                    .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+                    .setResolutionStrategy(
+                        ResolutionStrategy(adjustedSize, ResolutionStrategy.FALLBACK_RULE_NONE)
+                    )
                     .setAllowedResolutionMode(
                         ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE
                     )
