@@ -5,7 +5,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.util.Log
+import com.timelapse.camera.util.LogBuffer
 
 /**
  * 拍摄调度器 —— 基于 AlarmManager 的精确定时唤醒。
@@ -60,7 +60,7 @@ class CaptureScheduler private constructor(private val context: Context) {
                 alarmManager.setAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent
                 )
-                Log.w(TAG, "精确闹钟权限未授予，退化为非精确闹钟")
+                LogBuffer.log("W", TAG, "精确闹钟权限未授予，退化为非精确闹钟")
             } else {
                 alarmManager.setExactAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent
@@ -71,7 +71,7 @@ class CaptureScheduler private constructor(private val context: Context) {
             alarmManager.setAndAllowWhileIdle(
                 AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent
             )
-            Log.w(TAG, "精确闹钟被拒绝，退化为非精确闹钟", e)
+            LogBuffer.log("W", TAG, "精确闹钟被拒绝，退化为非精确闹钟", e)
         }
 
         Log.i(TAG, "已安排下次拍摄：${delaySeconds}秒后")
@@ -84,7 +84,7 @@ class CaptureScheduler private constructor(private val context: Context) {
     fun cancel() {
         val pendingIntent = buildPendingIntent(PendingIntent.FLAG_NO_CREATE)
         pendingIntent?.let { alarmManager.cancel(it) }
-        Log.i(TAG, "已取消拍摄计划")
+        LogBuffer.log("I", TAG, "已取消拍摄计划")
     }
 
     private fun buildPendingIntent(flags: Int = PendingIntent.FLAG_UPDATE_CURRENT): PendingIntent? {

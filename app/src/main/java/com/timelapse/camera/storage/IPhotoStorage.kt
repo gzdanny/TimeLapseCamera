@@ -64,8 +64,10 @@ interface IPhotoStorage {
      * 5. 单轮最多删 maxDeleteCount 个，防止清理耗时过长影响拍摄节奏
      * 6. 空文件夹自动删除
      *
-     * 默认实现基于 File API，适用于 LocalPhotoStorage。
-     * DcimPhotoStorage 在 API 29+ 可能需要 override 用 MediaStore 删除。
+     * 默认实现基于 File API 删除文件，适用于 LocalPhotoStorage。
+     * 对于 DCIM 场景：App 对自己通过 MediaStore 写入的文件，
+     * 可以直接用 File API 删除（Android 11+ 允许 App 访问自己创建的文件）。
+     * 如果未来需要扩展支持清理系统相册中其他 App 写入的文件，才需要考虑 MediaStore 方案。
      *
      * @param thresholdGb 触发清理的剩余空间阈值（GB）
      * @param safeLineGb 清理目标安全线（GB）

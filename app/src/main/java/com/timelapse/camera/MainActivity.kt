@@ -42,9 +42,9 @@ class MainActivity : AppCompatActivity() {
             binding.bottomNav.selectedItemId = R.id.nav_status
 
             // 启动时枚举所有摄像头，输出到日志（方便排查分辨率问题）
-            Thread {
-                runCatching { CameraEnumerator.enumerate(this) }
-            }.start()
+            lifecycleScope.launch(Dispatchers.IO) {
+                runCatching { CameraEnumerator.enumerate(this@MainActivity) }
+            }
         }
 
         // 底部导航点击事件
