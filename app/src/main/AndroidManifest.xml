@@ -52,6 +52,12 @@
             android:foregroundServiceType="camera"
             android:exported="false" />
 
+        <!-- 守护服务: 独立进程，检测主服务并自动重启 -->
+        <service
+            android:name=".service.WatchdogService"
+            android:process=":watchdog"
+            android:exported="false" />
+
         <!-- 广播接收器: 接收AlarmManager定时唤醒 -->
         <receiver
             android:name=".scheduler.CaptureReceiver"

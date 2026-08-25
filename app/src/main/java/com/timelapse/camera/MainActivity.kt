@@ -10,6 +10,7 @@ import com.timelapse.camera.ui.gallery.GalleryFragment
 import com.timelapse.camera.ui.preview.PreviewFragment
 import com.timelapse.camera.ui.settings.SettingsFragment
 import com.timelapse.camera.ui.status.StatusFragment
+import com.timelapse.camera.service.WatchdogService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -38,6 +39,9 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // 启动守护服务（独立进程，检测主服务并负责重启）
+        startService(Intent(this, WatchdogService::class.java))
 
         // 默认显示状态页
         if (savedInstanceState == null) {

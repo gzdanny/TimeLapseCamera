@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Build
 import com.timelapse.camera.config.CaptureConfig
 import com.timelapse.camera.service.CaptureService
+import com.timelapse.camera.service.WatchdogService
 
 /**
  * 开机自启接收器 —— 手机重启后恢复拍摄服务。
@@ -31,5 +32,7 @@ class BootReceiver : BroadcastReceiver() {
         } else {
             context.startService(serviceIntent)
         }
+        // 守护服务独立进程，持续监控主服务并负责重启
+        context.startService(Intent(context, WatchdogService::class.java))
     }
 }
