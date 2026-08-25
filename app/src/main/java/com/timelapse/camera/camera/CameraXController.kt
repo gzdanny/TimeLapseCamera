@@ -109,15 +109,16 @@ class CameraXController(
                 lifecycleOwner = owner
 
                 // 获取当前设备旋转角（用于 setTargetRotation，确保 EXIF 方向正确）
-                val (adjustedSize, currentRotation) = getAdjustedSizeAndRotation(id)
-                LogBuffer.log("I", TAG, "目标分辨率: ${adjustedSize.width}x${adjustedSize.height}, 旋转=${currentRotation}")
+                val rawSize = getMaxJpegSize(id)
+                val (_, currentRotation) = getAdjustedSizeAndRotation(id)
+                // 直接传 rawSize，不手动对调长宽：CameraX 在指定 targetRotation 后会自动
+                // 处理旋转映射（如 ROTATION_90 时自行交换宽高），无需在 Java 层对调。
+                // 使用 FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER 防止找不到精确匹配时崩溃。
+                LogBuffer.log("I", TAG, "目标分辨率: ${rawSize.width}x${rawSize.height}, 旋转=${currentRotation}")
 
-                // 指定目标分辨率 + FALLBACK_RULE_NONE：
-                // 精确锁定 adjustedSize，当该尺寸不可用时直接报错，拒绝自动降级到次一档。
-                // 配合 PREFER_HIGHER_RESOLUTION 确保帧率不会牺牲分辨率。
                 val resolutionSelector = ResolutionSelector.Builder()
                     .setResolutionStrategy(
-                        ResolutionStrategy(adjustedSize, ResolutionStrategy.FALLBACK_RULE_NONE)
+                        ResolutionStrategy(rawSize, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)
                     )
                     .setAllowedResolutionMode(
                         ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE
