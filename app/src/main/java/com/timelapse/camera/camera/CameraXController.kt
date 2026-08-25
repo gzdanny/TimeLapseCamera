@@ -259,15 +259,16 @@ class CameraXController(
     }
 
     /**
-     * 获取调整后的目标分辨率和当前设备旋转角。
+     * 获取当前设备旋转角。
      *
-     * 为什么需要动态计算？Android 的设计坑：
-     * - getOutputSizes(JPEG) 返回的是传感器自然方向的尺寸（后置通常是横向，前置通常是纵向）
-     * - 如果直接传入 SensorSize(width=w, height=h)，但 targetRotation 是 ROTATION_90（竖屏），
-     *   CameraX 会将图片以 90° 旋转输出，导致实际宽高对调，出现裁切或拉伸
-     * - 正确做法：根据当前旋转角，将长宽对调，使 "指定尺寸" 与 "实际输出方向" 匹配
+     * 关于分辨率的说明：
+     * - getOutputSizes(JPEG) 返回的是传感器自然方向的尺寸（后置通常是横向 16:9）
+     * - 传给 CameraX 时直接传 rawSize，设置 setTargetRotation(rotation)
+     * - CameraX 内部会自动处理旋转映射（如 ROTATION_90 时自行交换宽高），
+     *   不需要在 Java 层手动对调长宽。手动对调反而会导致 aspect ratio 与
+     *   传感器实际输出不匹配，触发 no available output size 错误。
      *
-     * 返回值：Pair<Size, Int>，Size 是已调整的尺寸，Int 是当前 surface 旋转角
+     * 返回值：Pair<Size, Int>，Size 是 rawSize（未对调），Int 是当前 surface 旋转角
      */
     private fun getAdjustedSizeAndRotation(cameraId: String): Pair<Size, Int> {
         val rawSize = getMaxJpegSize(cameraId)
