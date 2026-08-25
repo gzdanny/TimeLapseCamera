@@ -46,13 +46,16 @@ import kotlinx.coroutines.withContext
  *   → 用户点击停止或系统杀掉 → 结束
  *
  * 三层保活机制：
- * 1. 前台服务通知 —— 进程不被系统主动杀死（主要）
+ * 1. 前台服务通知（IMPORTANCE_DEFAULT）—— 进程不被系统主动杀死（主要）
  * 2. START_STICKY —— 被杀后系统尽量重启
  * 3. AlarmManager 备份 —— 每次拍摄后设闹钟，服务被杀则闹钟重启
  *
+ * WakeLock 策略：服务启动时持有，贯穿整个运行期，防止息屏时 CPU 秒睡导致服务被杀。
+ * onDestroy 时释放，避免电池耗尽。
+ *
  * 教学要点：
  * - setChronometerCountDown(true) 让系统自动渲染倒计时，App 无需定时刷新通知
- * - WakeLock 仅在拍摄瞬间持有（秒级），间隔期靠前台通知保活，不持锁
+ * - WakeLock 全程持有确保息屏也能稳定拍摄，代价是间隔期 CPU 不进入深度睡眠
  * - withContext(NonCancellable) 确保 stopForeground/stopSelf 在协程取消后仍执行
  */
 class CaptureService : Service() {
@@ -115,6 +118,8 @@ class CaptureService : Service() {
 
                 if (captureJob == null || !captureJob!!.isActive) {
                     LogBuffer.log("I", TAG, "拍摄服务启动，间隔 ${config.intervalSeconds}s")
+                    // 开机保活：持有 WakeLock 贯穿整个服务运行期，防止息屏时 CPU 秒睡导致服务被杀
+                    acquireWakeLock()
                     captureJob = serviceScope.launch { captureLoop() }
                 }
                 return START_STICKY
@@ -126,9 +131,11 @@ class CaptureService : Service() {
      * 拍摄循环：拍照 → 水印 → 存盘 → 更新倒计时 → 协程等待 → 重复
      *
      * Bitmap 内存责任链（教学要点）：
-     *   CameraXController 创建 → WatermarkProcessor 直接绘制 → IPhotoStorage 存盘后 recycle
+     *   CameraXController 创建 → WatermarkProcessor 直接绘制 → IPhotoStorage 存盘
      *   ↑                    ↑                        ↑
      *   1 个 mutable Bitmap 对象在链上传递，全程峰值 = 单张图大小（~8MB）
+     *
+     * WakeLock 由服务启动时持有，贯穿整个 captureLoop 运行期，不在循环内重复 acquire/release。
      *
      * 被取消时（用户停止 / 服务被杀），finally 块清理并停止服务
      */
@@ -163,8 +170,8 @@ class CaptureService : Service() {
                     }
                 }
 
-                // ── 2. 拍摄（WakeLock 仅在此阶段持有）──
-                acquireWakeLock()
+                // ── 2. 拍摄 ──
+                // WakeLock 已由服务启动时持有（防止息屏秒睡），此处只需正常拍摄
                 val timestamp = System.currentTimeMillis()
                 try {
                     LogBuffer.log("I", TAG, "开始拍摄 #${config.captureCount + 1}")
@@ -217,7 +224,6 @@ class CaptureService : Service() {
                 } finally {
                     // Bitmap 生命周期闭环：无论成功/失败/异常，统一回收，杜绝双重回收或泄漏
                     bitmapToSave.recycle()
-                    releaseWakeLock()
                 }
 
                 // ── 3. 更新倒计时通知（系统自动渲染，零功耗）──
@@ -226,7 +232,7 @@ class CaptureService : Service() {
                 // ── 4. AlarmManager 备份：服务被杀后闹钟重启 ──
                 CaptureScheduler.get(this).scheduleNext(nextDelay)
 
-                // ── 5. 协程等待（主调度，间隔期不持 WakeLock）──
+                // ── 5. 协程等待（主调度，WakeLock 全程持有防息屏秒睡）──
                 LogBuffer.log("I", TAG, "等待 ${nextDelay}s 后进入下一轮")
                 delay(nextDelay * 1000L)
               } catch (e: CancellationException) {
@@ -283,7 +289,7 @@ class CaptureService : Service() {
                 NotificationChannel(
                     CHANNEL_ID,
                     getString(R.string.channel_name),
-                    NotificationManager.IMPORTANCE_LOW
+                    NotificationManager.IMPORTANCE_DEFAULT
                 ).apply {
                     description = getString(R.string.channel_desc)
                     setShowBadge(false)
@@ -336,6 +342,7 @@ class CaptureService : Service() {
         captureJob?.cancel()
         releaseWakeLock()
         serviceScope.cancel()
+        stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
 }

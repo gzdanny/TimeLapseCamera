@@ -107,14 +107,13 @@ class CameraXController(
                 lifecycleOwner = owner
 
                 // 查所选摄像头的最高 JPEG 分辨率，用 ResolutionSelector 精确指定
-                // （setTargetResolution 已废弃，且在部分设备上选到错误分辨率）
-                val maxSize = getMaxJpegSize(id)
-                LogBuffer.log("I", TAG, "目标分辨率: ${maxSize.width}x${maxSize.height}")
+                val (adjustedSize, currentRotation) = getAdjustedSizeAndRotation(id)
+                LogBuffer.log("I", TAG, "目标分辨率: ${adjustedSize.width}x${adjustedSize.height}, 旋转=${currentRotation}")
 
                 val resolutionSelector = ResolutionSelector.Builder()
                     .setResolutionStrategy(
                         ResolutionStrategy(
-                            maxSize,
+                            adjustedSize,
                             ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
                         )
                     )
@@ -124,7 +123,7 @@ class CameraXController(
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                     .setResolutionSelector(resolutionSelector)
                     .setJpegQuality(90)
-                    .setTargetRotation(android.view.Surface.ROTATION_0)
+                    .setTargetRotation(currentRotation)
                     .build()
                 imageCapture = capture
 
@@ -251,6 +250,35 @@ class CameraXController(
             LogBuffer.log("W", TAG, "getMaxJpegSize 失败: ${it.message}，使用兜底分辨率 4032x3024")
             Size(4032, 3024)
         }
+    }
+
+    /**
+     * 获取调整后的目标分辨率和当前设备旋转角。
+     *
+     * 为什么需要动态计算？Android 的设计坑：
+     * - getOutputSizes(JPEG) 返回的是传感器自然方向的尺寸（后置通常是横向，前置通常是纵向）
+     * - 如果直接传入 SensorSize(width=w, height=h)，但 targetRotation 是 ROTATION_90（竖屏），
+     *   CameraX 会将图片以 90° 旋转输出，导致实际宽高对调，出现裁切或拉伸
+     * - 正确做法：根据当前旋转角，将长宽对调，使 "指定尺寸" 与 "实际输出方向" 匹配
+     *
+     * 返回值：Pair<Size, Int>，Size 是已调整的尺寸，Int 是当前 surface 旋转角
+     */
+    private fun getAdjustedSizeAndRotation(cameraId: String): Pair<Size, Int> {
+        val rawSize = getMaxJpegSize(cameraId)
+
+        // 获取当前屏幕旋转角（0/90/180/270）
+        val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val rotation = wm.defaultDisplay.rotation
+
+        // 竖屏时（90° 或 270°），传感器原图的"宽"变成实际的"高"，"高"变成实际的"宽"
+        val adjustedSize = if (rotation == Surface.ROTATION_90 || rotation == Surface.ROTATION_270) {
+            Size(rawSize.height, rawSize.width)
+        } else {
+            rawSize
+        }
+
+        LogBuffer.log("I", TAG, "设备旋转角=${rotation}, 原始=${rawSize.width}x${rawSize.height}, 调整后=${adjustedSize.width}x${adjustedSize.height}")
+        return Pair(adjustedSize, rotation)
     }
 
     /**
