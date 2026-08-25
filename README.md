@@ -186,9 +186,29 @@ val adjustedSize = if (rotation == ROTATION_90 || rotation == ROTATION_270) {
 
 ImageCapture.Builder()
     .setTargetRotation(rotation)  // 让 CameraX 知道当前方向
-    .setResolutionSelector(...)
+    .setResolutionSelector(
+        ResolutionSelector.Builder()
+            .setResolutionStrategy(
+                ResolutionStrategy(adjustedSize, ResolutionStrategy.FALLBACK_RULE_NONE)
+            )
+            .setAllowedResolutionMode(
+                ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE
+            )
+            .build()
+    )
     .build()
 ```
+
+**ResolutionStrategy 的 fallback 规则说明**（查官方文档：`ResolutionStrategy`）：
+
+| 常量 | 行为 |
+|------|------|
+| `FALLBACK_RULE_NONE` | 指定的尺寸不可用时直接报错，不降级 |
+| `FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER` | 先找更高一档，再找更低一档（默认） |
+| `FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER` | 先找更低一档，找不到才用更高的 |
+| `FALLBACK_RULE_CLOSEST_LOWER` | 只找更低一档 |
+
+本项目使用 `FALLBACK_RULE_NONE` 确保不会悄悄降级到次一档分辨率，出问题时应明确报错而非拍出低质量图片。
 
 这就是为什么 `CameraXController.kt` 中有 `getAdjustedSizeAndRotation()` 方法，
 它实时读取旋转角并调整目标分辨率——确保无论手机怎么转，输出都是正确的尺寸。
