@@ -108,26 +108,17 @@ class CameraXController(
                 lifecycleRegistry = LifecycleRegistry(owner).apply { currentState = Lifecycle.State.RESUMED }
                 lifecycleOwner = owner
 
-                // 1. 获取该镜头物理传感器的最大原生尺寸（永远是横向大图，例如 3840×2160）
+                // 1. 获取该镜头物理传感器的最大原生尺寸
                 val rawMaxSize = getMaxJpegSize(id)
                 val currentRotation = getRotation(context)
 
-                // 2. 【核心契约】根据当前手机的摆放方向，动态对调分辨率的长宽
-                // 竖屏/倒立状态（90/270）：保持原始尺寸（Sensor 自然方向即为竖屏输出）
-                // 横屏状态（0/180）：对调长宽，匹配横向输出形态
-                val adjustedSize = when (currentRotation) {
-                    Surface.ROTATION_0, Surface.ROTATION_180 -> {
-                        Size(rawMaxSize.height, rawMaxSize.width) // 长宽对调
-                    }
-                    else -> rawMaxSize // 竖屏保持原样
-                }
+                // 2. 直接用 rawMaxSize，不手动对调长宽：CameraX 的 setTargetRotation 会内部处理旋转映射
+                LogBuffer.log("I", TAG, "目标分辨率: ${rawMaxSize.width}x${rawMaxSize.height}, 旋转=${currentRotation}")
 
-                LogBuffer.log("I", TAG, "原始尺寸: ${rawMaxSize.width}x${rawMaxSize.height}, 调整后: ${adjustedSize.width}x${adjustedSize.height}, 旋转=${currentRotation}")
-
-                // 3. 构建分辨率选择器，用 FALLBACK_RULE_NONE 封死任何偷懒降级的可能
+                // 3. 用 FALLBACK_RULE_NONE 封死降级，找不到精确匹配直接报错
                 val resolutionSelector = ResolutionSelector.Builder()
                     .setResolutionStrategy(
-                        ResolutionStrategy(adjustedSize, ResolutionStrategy.FALLBACK_RULE_NONE)
+                        ResolutionStrategy(rawMaxSize, ResolutionStrategy.FALLBACK_RULE_NONE)
                     )
                     .setAllowedResolutionMode(
                         ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE
