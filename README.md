@@ -156,50 +156,49 @@ app/src/main/java/com/timelapse/camera/
 CameraX 底层就是 Camera2，功能完全一致，但代码量减少 40%+，
 教学上学生能把注意力放在"延时相机的架构"而不是"Camera2 的繁琐配置"。
 
-#### ⚠️ CameraX 的旋转与分辨率陷阱
+#### CameraX 旋转与分辨率的正确用法
 
-本项目实际测试时发现：**手动对调传感器尺寸会导致"no available output size"错误**。根因是 Android 系统设计坑：
+通过长期测试，我们厘清了 CameraX 内部的工作机制。正确做法只有四步：
 
 ```
-SENSOR_INFO_PIXEL_ARRAY_SIZE（传感器物理尺寸）≠ getOutputSizes(JPEG)（JPEG输出能力）
-  - 传感器：4208×3120（13.1MP，硬件像素阵列）
-  - CameraX JPEG 最大输出：3840×2160（4K，受限于 Camera HAL 抽象层）
-
-之前的错误做法：把 rawSize 按旋转角对调后传入 CameraX
-  → 竖屏时传入 3120×4208（4:3），但摄像头实际只支持 16:9 输出
-  → CameraX 找不到匹配，抛出 "No available output size" 异常
-
-正确做法：直接传 rawSize（不做对调），靠 setTargetRotation 让 CameraX 自行处理旋转映射：
+1. 选定摄像头（按 cameraId）
+2. 查询该摄像头的最高 JPEG 分辨率 + 手机当前旋转角
+3. 直接传 rawSize，设置 setTargetRotation(rotation)
+4. CameraX 内部根据 rotation 自行计算数据流投影方向，输出正确方向的图片
 ```
 
-**正确做法**：每次拍摄前动态读取设备旋转角，并将 `targetRotation` 设为当前角，同时根据旋转角对调分辨率的长宽：
+**关键理解：不需要在 Java 层手动对调长宽**
 
 ```kotlin
-val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-val rotation = wm.defaultDisplay.rotation
-
-val adjustedSize = if (rotation == ROTATION_90 || rotation == ROTATION_270) {
-    Size(rawSize.height, rawSize.width)  // 竖屏时对调
-} else {
-    rawSize
-}
+val rawMaxSize = getMaxJpegSize(cameraId)   // 例：3840×2160（16:9 横向传感器）
+val currentRotation = getRotation(context)  // 0/90/180/270
 
 ImageCapture.Builder()
-    .setTargetRotation(rotation)  // 让 CameraX 知道当前方向
+    .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
     .setResolutionSelector(
         ResolutionSelector.Builder()
             .setResolutionStrategy(
-                ResolutionStrategy(adjustedSize, ResolutionStrategy.FALLBACK_RULE_NONE)
+                ResolutionStrategy(rawMaxSize, ResolutionStrategy.FALLBACK_RULE_NONE)
             )
             .setAllowedResolutionMode(
                 ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE
             )
             .build()
     )
+    .setTargetRotation(currentRotation)   // ← 只需告诉 CameraX 当前方向
     .build()
 ```
 
-**ResolutionStrategy 的 fallback 规则说明**（查官方文档：`ResolutionStrategy`）：
+CameraX 收到正确的 `targetRotation` 后，会在底层自动完成：
+- 数据流方向映射（如竖屏时自行交换宽高）
+- EXIF 方向写入
+- 最终输出正确方向的照片
+
+**为什么不能手动对调尺寸？** 之前曾尝试在 Java 层根据旋转角对调长宽传入，结果触发了 "No available output size" 错误。原因是 `getOutputSizes(JPEG)` 返回的是 Camera HAL 抽象层给出的已考虑旋转的可用尺寸列表，手动对调会导致 aspect ratio 与实际输出不匹配。
+
+**关于分辨率大小的说明**：系统相机 App 能拍出 4208×3120，是因为它使用厂商私有 API 绕过标准限制。CameraX 通过标准 API 获取的 JPEG 最大输出为 3840×2160（4K），这是硬件抽象层的正常表现。
+
+**ResolutionStrategy 的 fallback 规则**（查官方文档：`ResolutionStrategy`）：
 
 | 常量 | 行为 |
 |------|------|
@@ -208,11 +207,7 @@ ImageCapture.Builder()
 | `FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER` | 先找更低一档，找不到才用更高的 |
 | `FALLBACK_RULE_CLOSEST_LOWER` | 只找更低一档 |
 
-本项目使用 `FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER`：找不到精确匹配时找最接近的高一档，再找不到才用低一档。避免 `FALLBACK_RULE_NONE` 因 aspect ratio 不匹配而直接报错导致拍摄失败。
-
-这就是为什么 `CameraXController.kt` 中有 `getAdjustedSizeAndRotation()` 方法，它读取旋转角传给 `setTargetRotation()`——CameraX 收到正确的旋转角后会自动处理尺寸映射，不需要在 Java 层手动对调长宽。
-
-**关于分辨率的补充说明**：系统相机 App 能拍出 4208×3120，是因为它使用厂商私有 API 绕过 CameraX 的限制。CameraX 通过标准 API 获取的 JPEG 最大输出尺寸为 3840×2160（4K），这是硬件抽象层的正常表现，不影响实际使用效果。
+本项目使用 `FALLBACK_RULE_NONE`：确保不会悄悄降级到次一档分辨率，找不到精确匹配时明确报错，方便排查问题。
 
 ### 3. 水印为什么加电量/存储/温度？
 

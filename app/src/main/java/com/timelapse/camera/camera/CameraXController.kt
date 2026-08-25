@@ -260,7 +260,9 @@ class CameraXController(
 
     /**
      * 获取当前设备屏幕旋转角（0/90/180/270），用于 setTargetRotation。
-     * CameraX 收到正确的 targetRotation 后会自动处理尺寸映射，不需要手动对调 SensorSize。
+     *
+     * CameraX 内部会根据 targetRotation 自行完成数据流方向的映射（如竖屏时交换宽高），
+     * 不需要在 Java 层手动对调 SensorSize 的长宽。
      */
     private fun getRotation(context: Context): Int {
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
