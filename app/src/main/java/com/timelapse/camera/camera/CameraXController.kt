@@ -7,6 +7,7 @@ import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.util.Size
+import android.view.Surface
 import android.view.WindowManager
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
@@ -107,20 +108,33 @@ class CameraXController(
                 lifecycleRegistry = LifecycleRegistry(owner).apply { currentState = Lifecycle.State.RESUMED }
                 lifecycleOwner = owner
 
-                // 获取当前设备旋转角（用于 setTargetRotation，确保 EXIF 方向正确）
-                val rawSize = getMaxJpegSize(id)
+                // 1. 获取该镜头物理传感器的最大原生尺寸（永远是横向大图，例如 3840×2160）
+                val rawMaxSize = getMaxJpegSize(id)
                 val currentRotation = getRotation(context)
-                LogBuffer.log("I", TAG, "目标分辨率: ${rawSize.width}x${rawSize.height}, 旋转=${currentRotation}")
 
+                // 2. 【核心契约】根据当前手机的摆放方向，动态对调分辨率的长宽
+                // 竖屏/倒立状态（90/270）：保持原始尺寸（Sensor 自然方向即为竖屏输出）
+                // 横屏状态（0/180）：对调长宽，匹配横向输出形态
+                val adjustedSize = when (currentRotation) {
+                    Surface.ROTATION_0, Surface.ROTATION_180 -> {
+                        Size(rawMaxSize.height, rawMaxSize.width) // 长宽对调
+                    }
+                    else -> rawMaxSize // 竖屏保持原样
+                }
+
+                LogBuffer.log("I", TAG, "原始尺寸: ${rawMaxSize.width}x${rawMaxSize.height}, 调整后: ${adjustedSize.width}x${adjustedSize.height}, 旋转=${currentRotation}")
+
+                // 3. 构建分辨率选择器，用 FALLBACK_RULE_NONE 封死任何偷懒降级的可能
                 val resolutionSelector = ResolutionSelector.Builder()
                     .setResolutionStrategy(
-                        ResolutionStrategy(rawSize, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)
+                        ResolutionStrategy(adjustedSize, ResolutionStrategy.FALLBACK_RULE_NONE)
                     )
                     .setAllowedResolutionMode(
                         ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE
                     )
                     .build()
 
+                // 4. 组装 ImageCapture
                 val capture = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                     .setResolutionSelector(resolutionSelector)
