@@ -119,9 +119,17 @@ class CaptureService : Service() {
 
                 if (captureJob == null || !captureJob!!.isActive) {
                     LogBuffer.log("I", TAG, "拍摄服务启动，间隔 ${config.intervalSeconds}s")
-                    // 开机保活：持有 WakeLock 贯穿整个服务运行期，防止息屏时 CPU 秒睡导致服务被杀
                     acquireWakeLock()
                     captureJob = serviceScope.launch { captureLoop() }
+                }
+                // 保险闹钟：每 30s 重新注册下次拍摄闹钟，确保闹钟不丢
+                if (alarmRefreshJob == null || !alarmRefreshJob!!.isActive) {
+                    alarmRefreshJob = serviceScope.launch {
+                        while (true) {
+                            delay(ALARM_REFRESH_INTERVAL_SECONDS * 1000L)
+                            CaptureScheduler.get(applicationContext).scheduleNext(ALARM_REFRESH_INTERVAL_SECONDS)
+                        }
+                    }
                 }
                 return START_STICKY
             }
@@ -322,7 +330,9 @@ class CaptureService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_camera)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            // PRIORITY_HIGH 是锁屏显示的前提条件；VISIBILITY_PUBLIC 强制在锁屏上可见
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(contentIntent)
             .setWhen(nextTime)
             .setShowWhen(true)
@@ -342,6 +352,7 @@ class CaptureService : Service() {
 
     override fun onDestroy() {
         captureJob?.cancel()
+        alarmRefreshJob?.cancel()
         releaseWakeLock()
         serviceScope.cancel()
         stopForeground(STOP_FOREGROUND_REMOVE)
