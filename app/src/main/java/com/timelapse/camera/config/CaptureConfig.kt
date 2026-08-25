@@ -107,12 +107,12 @@ data class CaptureConfig(
         fun load(context: Context): CaptureConfig {
             val prefs = prefs(context)
             return CaptureConfig(
-                intervalSeconds = prefs.getInt(KEY_INTERVAL, 3600),
+                intervalSeconds = prefs.getInt(KEY_INTERVAL, 30),
                 cameraId = prefs.getString(KEY_CAMERA_ID, "0") ?: "0",
                 watermarkText = prefs.getString(KEY_WATERMARK, null),
                 watermarkShowBattery = prefs.getBoolean(KEY_WATERMARK_BATTERY, true),
                 watermarkShowStorage = prefs.getBoolean(KEY_WATERMARK_STORAGE, true),
-                watermarkShowTemperature = prefs.getBoolean(KEY_WATERMARK_TEMP, false),
+                watermarkShowTemperature = prefs.getBoolean(KEY_WATERMARK_TEMP, true),
                 remoteConfigUrl = prefs.getString(KEY_REMOTE_URL, null),
                 isRunning = prefs.getBoolean(KEY_IS_RUNNING, false),
                 captureCount = prefs.getInt(KEY_CAPTURE_COUNT, 0),
