@@ -10,12 +10,14 @@ import android.content.Intent
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
-import androidx.lifecycle.MainScope
 import com.timelapse.camera.R
 import com.timelapse.camera.scheduler.CaptureScheduler
 import com.timelapse.camera.util.LogBuffer
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -39,6 +41,7 @@ class WatchdogService : Service() {
         private const val CHECK_INTERVAL_MS = 60_000L // 每 60s 检查一次
     }
 
+    // 使用 CoroutineScope 替代 MainScope，避免引入 lifecycle-runtime-ktx 依赖
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var checkJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
