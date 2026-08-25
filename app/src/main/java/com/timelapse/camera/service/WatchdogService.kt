@@ -88,7 +88,9 @@ class WatchdogService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_camera)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            // PRIORITY_HIGH + VISIBILITY_PUBLIC：锁屏可见，确保系统信任前台服务状态
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentTitle("延时相机守护中")
             .build()
     }
