@@ -65,7 +65,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:gravity="center"
-                android:text="@string/preview_test_ok"
+                android:text="@string/preview_test_saved"
                 android:textColor="@android:color/white"
                 android:textSize="12sp" />
         </LinearLayout>
