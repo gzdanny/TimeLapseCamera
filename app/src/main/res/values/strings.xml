@@ -30,10 +30,8 @@
     <!-- 预览页 -->
     <string name="btn_test_capture">立即拍一张</string>
     <string name="preview_capture_hint">试拍保存为 Test.jpg，与正式拍摄使用相同管线</string>
-    <string name="preview_test_ok">试拍成功 ✓</string>
     <string name="preview_test_saved">已保存为 Test.jpg，可在相册查看</string>
     <string name="preview_test_fail">试拍失败</string>
-    <string name="preview_no_camera_permission">请先授予相机权限</string>
 
     <!-- 相册页 -->
     <string name="gallery_empty">暂无照片</string>
