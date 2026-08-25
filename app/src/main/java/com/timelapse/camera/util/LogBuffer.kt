@@ -17,11 +17,11 @@ import java.util.Locale
  * 持久化设计：
  * - 每条日志同时写入内存缓冲和文件（append 模式）
  * - 崩溃后重启，init() 从文件加载历史日志到内存
- * - 文件超过 MAX_SIZE 行时自动截断（保留最近条目）
+ * - 内存缓冲最多保留 500 条，文件超过 ~100KB 自动截断（保留最近条目）
  */
 object LogBuffer {
 
-    private const val MAX_SIZE = 50
+    private const val MAX_SIZE = 500
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
     private val logs = mutableListOf<String>()
