@@ -56,7 +56,7 @@
 │  │     │                                    │  │
 │  │     ├── 更新倒计时通知（系统自动渲染）         │  │
 │  │     ├── scheduleNext() 备份闹钟             │  │
-│  │     └── delay(间隔) → 协程挂起，不持WakeLock  │  │
+│  │     └── delay(间隔) → 协程挂起，WakeLock 全程持有防息屏秒睡│ │
 │  │                                            │  │
 │  │  ↺ 循环直到 isRunning=false 或被取消          │  │
 │  └────────────────────────────────────────────┘  │
@@ -155,6 +155,43 @@ app/src/main/java/com/timelapse/camera/
 
 CameraX 底层就是 Camera2，功能完全一致，但代码量减少 40%+，
 教学上学生能把注意力放在"延时相机的架构"而不是"Camera2 的繁琐配置"。
+
+#### ⚠️ CameraX 的旋转与分辨率陷阱
+
+本项目实际测试时发现：**"ROTATION_0 + EXIF 方向"的方案在某些设备上会出错**，导致照片出现裁切或尺寸异常。根因是 Android 的系统设计坑：
+
+```
+getOutputSizes(JPEG) 返回的是传感器的"自然方向"尺寸
+  - 后置摄像头：通常是横向（如 4208×3120）
+  - 前置摄像头：通常是纵向（如 3264×2448）
+
+但如果 targetRotation = ROTATION_0（横向），而用户实际是竖屏使用：
+  → CameraX 输出 4208×3120 的水平图
+  → 系统相册按 EXIF 旋转 90° 后，用户看到的是竖构图
+  → 但部分国产 ROM 的 CameraX 实现无法正确写入 EXIF 方向信息
+  → 结果：照片被强制裁切成错误的宽高比
+```
+
+**正确做法**：每次拍摄前动态读取设备旋转角，并将 `targetRotation` 设为当前角，同时根据旋转角对调分辨率的长宽：
+
+```kotlin
+val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+val rotation = wm.defaultDisplay.rotation
+
+val adjustedSize = if (rotation == ROTATION_90 || rotation == ROTATION_270) {
+    Size(rawSize.height, rawSize.width)  // 竖屏时对调
+} else {
+    rawSize
+}
+
+ImageCapture.Builder()
+    .setTargetRotation(rotation)  // 让 CameraX 知道当前方向
+    .setResolutionSelector(...)
+    .build()
+```
+
+这就是为什么 `CameraXController.kt` 中有 `getAdjustedSizeAndRotation()` 方法，
+它实时读取旋转角并调整目标分辨率——确保无论手机怎么转，输出都是正确的尺寸。
 
 ### 3. 水印为什么加电量/存储/温度？
 
@@ -312,6 +349,116 @@ CameraXController
 2. **系统内存压力大时**：GC 阈值降低，本来能在 Young Gen 回收的对象可能被提早晋升到 Old Gen，增加 Full GC 概率。但这是系统级问题，App 层面能做的有限。
 
 **结论**：当前设计在典型使用场景下（分钟/小时级间隔）GC 压力可以忽略。只有当你要做秒级延时视频时，才需要考虑 `inBitmap` 复用、对象池等进一步优化。
+
+## 深度专题：Android 息屏保活与摄像头调用
+
+Android 的后台保活和相机调用是生态中最复杂的两个坑。本项目在长期测试中踩了多个真实 bug，以下记录关键问题和解决思路，供教学参考。
+
+### 问题一：息屏后无法正常拍照（CPU 秒睡）
+
+**现象**：手机锁屏后，App 停止拍摄，日志和照片均无新增；每隔数小时偶尔恢复一张，时机不确定。解锁后打开 App，循环恢复正常。
+
+**根因分析**：
+
+```
+锁屏 → Android 进入 Doze 模式 → CPU 周期性休眠
+    ↓
+前台服务通知（IMPORTANCE_LOW）→ 优先级太低，被系统忽略
+    ↓
+协程 delay() 挂起 → CPU 休眠期间 delay 不推进
+    ↓
+拍摄时机错过 → 闹钟备份（AlarmManager）触发但启动太慢 → 部分周期被跳过
+```
+
+我们最初的设计是**每次拍摄瞬间持有 WakeLock**（~3 秒），间隔期不持锁，认为"前台通知就够了"。但实测发现：
+- 国产 ROM（小米 MIUI、华为 EMUI）在息屏后**不尊重前台通知**，仍可能杀进程
+- `IMPORTANCE_LOW` 的通知在锁屏上**几乎不可见**，系统也更容易降权它
+- `delay()` 挂起期间没有 WakeLock，CPU 秒睡，闹钟启动时间隔已经过了
+
+**解决方案**：
+
+```kotlin
+// 服务启动时持有 WakeLock，贯穿整个运行期
+override fun onStartCommand(...) {
+    if (captureJob == null || !captureJob!!.isActive) {
+        acquireWakeLock()  // ← 全程持有，not 每轮重新 acquire/release
+        captureJob = serviceScope.launch { captureLoop() }
+    }
+}
+
+override fun onDestroy() {
+    releaseWakeLock()   // ← 只在服务销毁时释放
+    ...
+}
+```
+
+**代价与权衡**：
+| | 间歇 WakeLock（旧方案） | 全程 WakeLock（新方案） |
+|--|--|--|
+| 息屏拍摄稳定性 | ❌ 漏拍严重 | ✅ 稳定 |
+| 间隔期 CPU 功耗 | ~1μA（深度睡眠） | ~50-100mA（轻度唤醒） |
+| 1小时间隔额外耗电 | 0 | ~3-5mAh（约 0.5%） |
+
+对小时级延时拍摄，全程 WakeLock 的额外功耗可忽略不计，换取稳定性是完全值得的。
+
+### 问题二：CameraX 的旋转与分辨率陷阱
+
+**现象**：拍出的照片比系统相机裁切严重，分辨率明显下降。
+
+**根因**：`getOutputSizes(JPEG)` 返回的是传感器的**自然方向**尺寸，不是最终输出方向的尺寸：
+
+```
+后置摄像头传感器自然方向 = 横向
+  getOutputSizes → [4208×3120, 4208×3120, ...]  ← 宽 > 高
+
+但用户竖屏持机拍摄：
+  targetRotation = ROTATION_0（横向）
+  → CameraX 输出 4208×3120 的水平图
+  → 部分国产 ROM 的 CameraX 实现：
+     ① 不写入正确的 EXIF 方向信息
+     ② 或直接按错误的方向输出
+  → 结果：照片被强制裁切成错误的宽高比
+```
+
+**正确做法**：每次拍摄前动态读取旋转角，并根据旋转角对调分辨率的长宽：
+
+```kotlin
+// 获取当前设备旋转角
+val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+val rotation = wm.defaultDisplay.rotation  // 0/90/180/270
+
+// 竖屏时对调宽高
+val adjustedSize = if (rotation == ROTATION_90 || rotation == ROTATION_270) {
+    Size(rawSize.height, rawSize.width)  // 4208×3120 → 3120×4208
+} else {
+    rawSize
+}
+
+ImageCapture.Builder()
+    .setTargetRotation(rotation)      // ← 让 CameraX 知道当前方向
+    .setResolutionSelector(...)       // ← 用调整后的尺寸
+    .build()
+```
+
+这就是为什么 `CameraXController.kt` 中有 `getAdjustedSizeAndRotation()` 方法，
+它实时读取旋转角并调整目标分辨率，确保无论手机怎么转，输出都是正确的尺寸。
+
+### 问题三：通知在锁屏不可见
+
+**现象**：拍摄正常运行时，锁屏上看不到任何通知，解锁后才能看到。
+
+**根因**：`IMPORTANCE_LOW` + `PRIORITY_LOW` 的通知优先级太低，系统在锁屏上会隐藏它们。
+
+**解决方案**：通知 Channel 改为 `IMPORTANCE_DEFAULT`，并在锁屏上可见：
+
+```kotlin
+NotificationChannel(CHANNEL_ID, ..., NotificationManager.IMPORTANCE_DEFAULT)
+```
+
+> 注意：如果锁屏通知仍然不可见，需要在手机设置里单独检查：
+> **设置 → 应用 → 延时相机 → 通知管理 → 锁屏通知**（各厂商 ROM 路径不同）。
+
+---
 
 ## 深度专题：Android 生命周期与初始化时机
 
