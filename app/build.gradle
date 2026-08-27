@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace 'com.timelapse.camera'
-    compileSdk 34
+    compileSdk 35
 
     defaultConfig {
         applicationId "com.timelapse.camera"
         minSdk 26          // Android 8.0: CameraX 稳定，getExternalFilesDir无需权限
-        targetSdk 34
+        targetSdk 35
         versionCode 15
         versionName "0.9.8"
 
