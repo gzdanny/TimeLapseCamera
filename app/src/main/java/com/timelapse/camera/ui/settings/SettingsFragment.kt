@@ -153,6 +153,19 @@ class SettingsFragment : Fragment() {
     }
 
     /**
+     * 拍摄方向下拉：0=竖屏, 90=横屏(默认), 180=倒立, 270=横屏反。
+     */
+    private fun setupShotRotationSpinner() {
+        val rotationNames = listOf("竖屏", "横屏(90°)", "倒立(180°)", "横屏反(270°)")
+        val adapter = ArrayAdapter(
+            requireContext(), android.R.layout.simple_spinner_item, rotationNames
+        ).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        binding.spinnerShotRotation.adapter = adapter
+    }
+
+    /**
      * 根据当前选中的摄像头，重建分辨率下拉列表（取 jpegSizes 前 4 项，按面积降序）。
      */
     private fun refreshResolutionSpinner() {
