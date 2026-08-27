@@ -54,6 +54,8 @@ data class CaptureConfig(
     val lastCaptureTime: Long = 0,
     /** 照片存储位置 */
     val storageLocation: StorageLocation = StorageLocation.APP_PRIVATE,
+    /** 拍摄方向：0=竖屏, 90=横屏(默认), 180=倒立, 270=横屏反 */
+    val shotRotation: Int = 90,
     /** FIFO 清理阈值（GB）：剩余空间低于此值时触发清理 */
     val storageThresholdGb: Float = 1.0f,
     /** FIFO 清理安全线（GB）：清理到此值停止 */
@@ -73,6 +75,7 @@ data class CaptureConfig(
             putInt(KEY_LAST_REMOTE_INTERVAL, lastRemoteInterval)
             putLong(KEY_LAST_CAPTURE_TIME, lastCaptureTime)
             putString(KEY_STORAGE_LOCATION, storageLocation.name)
+            putInt(KEY_SHOT_ROTATION, shotRotation)
             putFloat(KEY_STORAGE_THRESHOLD, storageThresholdGb)
             putFloat(KEY_STORAGE_SAFE_LINE, storageSafeLineGb)
             apply()
@@ -119,6 +122,7 @@ data class CaptureConfig(
                 lastRemoteInterval = prefs.getInt(KEY_LAST_REMOTE_INTERVAL, 0),
                 lastCaptureTime = prefs.getLong(KEY_LAST_CAPTURE_TIME, 0),
                 storageLocation = StorageLocation.fromName(prefs.getString(KEY_STORAGE_LOCATION, null)),
+                shotRotation = prefs.getInt(KEY_SHOT_ROTATION, 90),
                 storageThresholdGb = prefs.getFloat(KEY_STORAGE_THRESHOLD, 1.0f),
                 storageSafeLineGb = prefs.getFloat(KEY_STORAGE_SAFE_LINE, 2.0f)
             )

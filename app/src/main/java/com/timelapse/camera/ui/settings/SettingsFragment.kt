@@ -61,6 +61,7 @@ class SettingsFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         setupCameraSpinner()
+        setupShotRotationSpinner()
         setupStorageLocationSpinner()
         loadConfigToUI()
         setupListeners()
@@ -93,6 +94,10 @@ class SettingsFragment : Fragment() {
         if (cameraIndex >= 0) {
             binding.spinnerCamera.setSelection(cameraIndex)
         }
+
+        // 拍摄方向（0/90/180/270 对应 4 个选项）
+        val rotationIndex = listOf(0, 90, 180, 270).indexOf(config.shotRotation).takeIf { it >= 0 } ?: 1
+        binding.spinnerShotRotation.setSelection(rotationIndex)
 
         // 存储位置
         val storagePosition = config.storageLocation.ordinal.coerceAtMost(
@@ -180,6 +185,19 @@ class SettingsFragment : Fragment() {
                     val selectedId = cameraList.getOrNull(pos)?.cameraId ?: return
                     if (config.cameraId != selectedId) {
                         config = config.copy(cameraId = selectedId)
+                        config.save(requireContext())
+                    }
+                }
+                override fun onNothingSelected(p: AdapterView<*>?) {}
+            }
+
+        // 拍摄方向
+        binding.spinnerShotRotation.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                    val rotation = listOf(0, 90, 180, 270)[pos]
+                    if (config.shotRotation != rotation) {
+                        config = config.copy(shotRotation = rotation)
                         config.save(requireContext())
                     }
                 }

@@ -7,7 +7,6 @@ import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.util.Size
-import android.view.WindowManager
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
@@ -51,7 +50,9 @@ import kotlin.coroutines.resume
 @OptIn(ExperimentalCamera2Interop::class)
 class CameraXController(
     private val context: Context,
-    private val cameraId: String
+    private val cameraId: String,
+    /** 用户设定的拍摄方向（0/90/180/270），直接传给 setTargetRotation，不再动态读取屏幕方向 */
+    private val shotRotation: Int
 ) : ICameraController {
 
     companion object {
@@ -106,7 +107,6 @@ class CameraXController(
 
                 // 1. 获取该镜头物理传感器的最高 JPEG 输出尺寸（通过底层 Camera2 API）
                 val rawMaxSize = getMaxJpegSize(id)
-                val currentRotation = getRotation(context)
 
                 // 2. 直接用 rawMaxSize，不手动对调长宽：CameraX 的 setTargetRotation 会内部处理旋转映射
                 //    之前曾尝试手动对调，结果触发了 "No available output size" 错误
@@ -125,7 +125,7 @@ class CameraXController(
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                     .setResolutionSelector(resolutionSelector)
                     .setJpegQuality(90)
-                    .setTargetRotation(currentRotation)  // ← 关键：告诉 CameraX 当前设备方向
+                    .setTargetRotation(shotRotation)  // ← 关键：使用用户设定的方向
                     .build()
                 imageCapture = capture
 
@@ -231,17 +231,6 @@ class CameraXController(
             LogBuffer.log("W", TAG, "getMaxJpegSize 失败: ${it.message}，使用兜底分辨率 4032x3024")
             Size(4032, 3024)
         }
-    }
-
-    /**
-     * 获取当前设备屏幕旋转角（0/90/180/270），用于 setTargetRotation。
-     *
-     * CameraX 内部会根据 targetRotation 自行完成数据流方向的映射（如竖屏时交换宽高），
-     * 不需要在 Java 层手动对调 SensorSize 的长宽。
-     */
-    private fun getRotation(context: Context): Int {
-        val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        return wm.defaultDisplay.rotation
     }
 
     /**

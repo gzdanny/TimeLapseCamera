@@ -185,7 +185,11 @@ class PreviewFragment : Fragment() {
                 val timestamp = System.currentTimeMillis()
 
                 // ── 2. 拍摄（主线程，CameraX 操作必须在主线程）──
-                val camera = CameraXController(requireContext(), config.cameraId)
+                val camera = CameraXController(
+                    requireContext(),
+                    config.cameraId,
+                    config.shotRotation
+                )
                 val result = camera.capture()
                 LogBuffer.log("I", "TestPhoto",
                     "拍摄完成: ${if (result is CaptureResult.Success) "成功" else "失败"}")
