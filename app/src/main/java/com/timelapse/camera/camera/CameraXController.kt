@@ -21,7 +21,6 @@ import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
-import java.util.concurrent.TimeUnit
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -164,9 +163,7 @@ class CameraXController(
                         metrics.heightPixels.toFloat().coerceAtLeast(1f)
                     )
                     camera.cameraControl.startFocusAndMetering(
-                        FocusMeteringAction.Builder(pointFactory.createPoint(0.5f, 0.5f))
-                            .setAutoCancelDuration(1, TimeUnit.SECONDS)
-                            .build()
+                        FocusMeteringAction.Builder(pointFactory.createPoint(0.5f, 0.5f)).build()
                     ).addListener({
                         LogBuffer.log("I", TAG, "AF/AE/AWB 完成，等待稳定")
                     }, ContextCompat.getMainExecutor(context))
