@@ -6,17 +6,22 @@ import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.util.DisplayMetrics
 import android.util.Size
+import android.view.WindowManager
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
+import androidx.camera.core.SurfaceOrientedMeteringPointFactory
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
+import java.util.concurrent.TimeUnit
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -145,6 +150,30 @@ class CameraXController(
 
                 provider.unbindAll()
                 val camera = provider.bindToLifecycle(lifecycleOwner!!, cameraSelector, capture)
+
+                // 5. 冷启动对焦：触发 AF/AE/AWB 并等待 300ms 让传感器稳定
+                //    低端机不加此步骤容易出现黑屏/模糊，官方文档推荐先对焦再拍摄
+                //    使用 SurfaceOrientedMeteringPointFactory + WindowManager，息屏时安全兜底
+                try {
+                    val metrics = DisplayMetrics().also {
+                        (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
+                            .defaultDisplay.getMetrics(it)
+                    }
+                    val pointFactory = SurfaceOrientedMeteringPointFactory(
+                        metrics.widthPixels.toFloat().coerceAtLeast(1f),
+                        metrics.heightPixels.toFloat().coerceAtLeast(1f)
+                    )
+                    camera.cameraControl.startFocusAndMetering(
+                        FocusMeteringAction.Builder(pointFactory.createPoint(0.5f, 0.5f))
+                            .setAutoCancelDuration(1, TimeUnit.SECONDS)
+                            .build()
+                    ).addListener({
+                        LogBuffer.log("I", TAG, "AF/AE/AWB 完成，等待稳定")
+                    }, ContextCompat.getMainExecutor(context))
+                    kotlinx.coroutines.delay(300L)
+                } catch (e: Exception) {
+                    LogBuffer.log("W", TAG, "冷启动对焦跳过: ${e.message}")
+                }
 
                 takePictureAndDecode()
             }

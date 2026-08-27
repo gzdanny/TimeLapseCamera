@@ -140,19 +140,6 @@ class SettingsFragment : Fragment() {
     }
 
     /**
-     * 初始化分辨率下拉：默认选中第一个选项（最高分辨率）。
-     * 切换摄像头时通过 refreshResolutionSpinner() 重建列表。
-     */
-    private fun setupResolutionSpinner() {
-        resolutionAdapter = ArrayAdapter(
-            requireContext(), android.R.layout.simple_spinner_item, listOf("加载中…")
-        ).apply {
-            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        }
-        binding.spinnerResolution.adapter = resolutionAdapter
-    }
-
-    /**
      * 拍摄方向下拉：0=竖屏, 90=横屏(默认), 180=倒立, 270=横屏反。
      */
     private fun setupShotRotationSpinner() {
@@ -163,6 +150,19 @@ class SettingsFragment : Fragment() {
             setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         }
         binding.spinnerShotRotation.adapter = adapter
+    }
+
+    /**
+     * 初始化分辨率下拉：默认选中第一个选项（最高分辨率）。
+     * 切换摄像头时通过 refreshResolutionSpinner() 重建列表。
+     */
+    private fun setupResolutionSpinner() {
+        resolutionAdapter = ArrayAdapter(
+            requireContext(), android.R.layout.simple_spinner_item, listOf("加载中…")
+        ).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        binding.spinnerResolution.adapter = resolutionAdapter
     }
 
     /**
