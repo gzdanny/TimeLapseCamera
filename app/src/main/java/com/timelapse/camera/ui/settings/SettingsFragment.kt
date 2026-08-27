@@ -468,6 +468,7 @@ class SettingsFragment : Fragment() {
 
     // ──────────── 权限状态刷新 ────────────
 
+    @Suppress("DEPRECATION")
     private fun refreshPermissionStatus() {
         // 相机权限
         val cameraGranted = PermissionChecker.hasCameraPermission(requireContext())
