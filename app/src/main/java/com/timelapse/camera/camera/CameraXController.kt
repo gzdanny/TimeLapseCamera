@@ -153,12 +153,13 @@ class CameraXController(
 
                 // 5. 冷启动对焦：触发 AF/AE/AWB 并等待 300ms 让传感器稳定
                 //    低端机不加此步骤容易出现黑屏/模糊，官方文档推荐先对焦再拍摄
-                //    使用 PointMeteringPointFactory + WindowManager，息屏时 getMetrics 返回 0 时安全兜底
+                //    使用 SurfaceOrientedMeteringPointFactory + WindowManager，息屏时安全兜底
                 try {
-                    val display = (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
-                        .defaultDisplay
-                    val metrics = DisplayMetrics().also { display.getMetrics(it) }
-                    val pointFactory = PointMeteringPointFactory(
+                    val metrics = DisplayMetrics().also {
+                        (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
+                            .defaultDisplay.getMetrics(it)
+                    }
+                    val pointFactory = SurfaceOrientedMeteringPointFactory(
                         metrics.widthPixels.toFloat().coerceAtLeast(1f),
                         metrics.heightPixels.toFloat().coerceAtLeast(1f)
                     )

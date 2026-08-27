@@ -163,9 +163,9 @@ class SettingsFragment : Fragment() {
         if (resolutionOptions.isEmpty()) {
             resolutionOptions = listOf("${currentInfo?.megapixels ?: "未知"} 最高")
         }
-        resolutionAdapter.clear()
-        resolutionAdapter.addAll(resolutionOptions)
-        resolutionAdapter.notifyDataSetChanged()
+        resolutionAdapter?.clear()
+        resolutionAdapter?.addAll(resolutionOptions)
+        resolutionAdapter?.notifyDataSetChanged()
     }
 
     /**
