@@ -9,10 +9,15 @@ import android.hardware.camera2.CameraManager
 import android.util.Size
 import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
+import androidx.camera.core.Camera
+import androidx.camera.core.CameraControl
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
+import androidx.camera.core.MeteringPointFactory
+import androidx.camera.core.SurfaceOrientedMeteringPointFactory
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -144,7 +149,28 @@ class CameraXController(
                     .build()
 
                 provider.unbindAll()
-                provider.bindToLifecycle(lifecycleOwner!!, cameraSelector, capture)
+                val camera = provider.bindToLifecycle(lifecycleOwner!!, cameraSelector, capture)
+
+                // 5. 冷启动对焦：触发 AF/AE/AWB 并等待 300ms 让传感器稳定
+                //    低端机不加此步骤容易出现黑屏/模糊，官方文档推荐先对焦再拍摄
+                try {
+                    val pointFactory = SurfaceOrientedMeteringPointFactory(
+                        camera.cameraInfo.previewInfo.resolution?.let { Size(it.width, it.height) }
+                            ?: Size(1920, 1080),
+                        camera.cameraInfo.displayOrientedSurfaceRect?.let { rect ->
+                            android.graphics.RectF(0f, 0f, rect.width().toFloat(), rect.height().toFloat())
+                        } ?: android.graphics.RectF(0f, 0f, 1f, 1f)
+                    )
+                    val meteringPoint = pointFactory.createPoint(0.5f, 0.5f)
+                    camera.cameraControl.startFocusAndMetering(
+                        FocusMeteringAction.Builder(meteringPoint).build()
+                    ).addListener({
+                        LogBuffer.log("I", TAG, "AF/AE/AWB 完成")
+                    }, ContextCompat.getMainExecutor(context))
+                    kotlinx.coroutines.delay(300L)
+                } catch (e: Exception) {
+                    LogBuffer.log("W", TAG, "对焦步骤跳过: ${e.message}")
+                }
 
                 takePictureAndDecode()
             }

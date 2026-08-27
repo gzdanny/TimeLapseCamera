@@ -281,7 +281,7 @@ class CaptureService : Service() {
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "TimeLapseCamera:Capture"
-        ).apply { acquire(30_000) }
+        ).apply { acquire(59_000) }
     }
 
     private fun releaseWakeLock() {
