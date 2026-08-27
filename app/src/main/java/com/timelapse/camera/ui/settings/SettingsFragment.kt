@@ -62,6 +62,7 @@ class SettingsFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
         setupCameraSpinner()
         setupShotRotationSpinner()
+        setupResolutionSpinner()
         setupStorageLocationSpinner()
         loadConfigToUI()
         setupListeners()
@@ -99,6 +100,14 @@ class SettingsFragment : Fragment() {
         val rotationIndex = listOf(0, 90, 180, 270).indexOf(config.shotRotation).takeIf { it >= 0 } ?: 1
         binding.spinnerShotRotation.setSelection(rotationIndex)
 
+        // 拍摄分辨率：用已保存的分辨率选中的项，没有则默认第一项
+        refreshResolutionSpinner()
+        if (config.resolution != null && resolutionOptions.contains(config.resolution)) {
+            binding.spinnerResolution.setSelection(resolutionOptions.indexOf(config.resolution))
+        } else if (resolutionOptions.isNotEmpty()) {
+            binding.spinnerResolution.setSelection(0)
+        }
+
         // 存储位置
         val storagePosition = config.storageLocation.ordinal.coerceAtMost(
             binding.spinnerStorageLocation.count - 1
@@ -124,6 +133,35 @@ class SettingsFragment : Fragment() {
         )
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         binding.spinnerCamera.adapter = adapter
+    }
+
+    /**
+     * 初始化分辨率下拉：默认选中第一个选项（最高分辨率）。
+     * 切换摄像头时通过 refreshResolutionSpinner() 重建列表。
+     */
+    private fun setupResolutionSpinner() {
+        resolutionAdapter = ArrayAdapter(
+            requireContext(), android.R.layout.simple_spinner_item, listOf("加载中…")
+        ).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        binding.spinnerResolution.adapter = resolutionAdapter
+    }
+
+    /**
+     * 根据当前选中的摄像头，重建分辨率下拉列表（取 jpegSizes 前 4 项，按面积降序）。
+     */
+    private fun refreshResolutionSpinner() {
+        val currentCameraId = config.cameraId
+        val currentInfo = cameraList.find { it.cameraId == currentCameraId }
+        val sizes = currentInfo?.jpegSizes?.take(4) ?: emptyList()
+        resolutionOptions = sizes.map { "${it.width}x${it.height}" }
+        if (resolutionOptions.isEmpty()) {
+            resolutionOptions = listOf("${currentInfo?.megapixels ?: "未知"} 最高")
+        }
+        resolutionAdapter.clear()
+        resolutionAdapter.addAll(resolutionOptions)
+        resolutionAdapter.notifyDataSetChanged()
     }
 
     /**
@@ -198,6 +236,19 @@ class SettingsFragment : Fragment() {
                     val rotation = listOf(0, 90, 180, 270)[pos]
                     if (config.shotRotation != rotation) {
                         config = config.copy(shotRotation = rotation)
+                        config.save(requireContext())
+                    }
+                }
+                override fun onNothingSelected(p: AdapterView<*>?) {}
+            }
+
+        // 拍摄分辨率
+        binding.spinnerResolution.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                    val selected = resolutionOptions.getOrNull(pos) ?: return
+                    if (config.resolution != selected) {
+                        config = config.copy(resolution = selected)
                         config.save(requireContext())
                     }
                 }
