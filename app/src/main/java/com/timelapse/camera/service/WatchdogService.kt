@@ -91,6 +91,7 @@ class WatchdogService : Service() {
     /**
      * 检查主服务（CaptureService）是否在运行中。
      */
+    @Suppress("DEPRECATION")
     private fun isMainServiceRunning(): Boolean {
         val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val running = am.getRunningServices(Int.MAX_VALUE)

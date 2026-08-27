@@ -49,7 +49,6 @@ import kotlinx.coroutines.withContext
  * - 试拍代码复用 CaptureService 的拍摄管线，确保验证的是真实流程
  * - 试拍照片用固定文件名，方便用户在相册中快速定位检查
  */
-@OptIn(ExperimentalCamera2Interop::class)
 class PreviewFragment : Fragment() {
 
     private var _binding: FragmentPreviewBinding? = null

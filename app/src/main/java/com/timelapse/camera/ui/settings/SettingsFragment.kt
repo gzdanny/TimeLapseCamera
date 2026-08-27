@@ -7,6 +7,7 @@ import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import androidx.fragment.app.Fragment
+import androidx.core.content.ContextCompat
 import com.timelapse.camera.R
 import com.timelapse.camera.camera.CameraEnumerator
 import com.timelapse.camera.config.CaptureConfig
@@ -357,7 +358,7 @@ class SettingsFragment : Fragment() {
             startActivity(PermissionChecker.exactAlarmSettingsIntent(requireContext()))
         }
         binding.rowBatteryOptimization.setOnClickListener {
-            startActivity(PermissionChecker.batteryOptimizationIntent(requireContext()))
+            startActivity(PermissionChecker.batteryOptimizationIntent())
         }
         binding.rowAppDetails.setOnClickListener {
             startActivity(PermissionChecker.appDetailsIntent(requireContext()))
@@ -474,8 +475,8 @@ class SettingsFragment : Fragment() {
         binding.tvCameraPermission.text = if (cameraGranted) getString(R.string.permission_granted)
         else getString(R.string.permission_denied)
         binding.tvCameraPermission.setTextColor(
-            if (cameraGranted) resources.getColor(android.R.color.holo_green_dark)
-            else resources.getColor(android.R.color.holo_red_dark)
+            if (cameraGranted) ContextCompat.getColor(requireContext(), android.R.color.holo_green_dark)
+            else ContextCompat.getColor(requireContext(), android.R.color.holo_red_dark)
         )
 
         // 通知权限
@@ -483,8 +484,8 @@ class SettingsFragment : Fragment() {
         binding.tvNotificationPermission.text = if (notifGranted) getString(R.string.permission_granted)
         else getString(R.string.permission_denied)
         binding.tvNotificationPermission.setTextColor(
-            if (notifGranted) resources.getColor(android.R.color.holo_green_dark)
-            else resources.getColor(android.R.color.holo_red_dark)
+            if (notifGranted) ContextCompat.getColor(requireContext(), android.R.color.holo_green_dark)
+            else ContextCompat.getColor(requireContext(), android.R.color.holo_red_dark)
         )
 
         // 精确闹钟
@@ -492,8 +493,8 @@ class SettingsFragment : Fragment() {
         binding.tvExactAlarm.text = if (exactAlarm) getString(R.string.permission_enabled)
         else getString(R.string.permission_disabled)
         binding.tvExactAlarm.setTextColor(
-            if (exactAlarm) resources.getColor(android.R.color.holo_green_dark)
-            else resources.getColor(android.R.color.holo_red_dark)
+            if (exactAlarm) ContextCompat.getColor(requireContext(), android.R.color.holo_green_dark)
+            else ContextCompat.getColor(requireContext(), android.R.color.holo_red_dark)
         )
 
         // 电池优化
@@ -501,8 +502,8 @@ class SettingsFragment : Fragment() {
         binding.tvBatteryOptimization.text = if (ignoring) getString(R.string.permission_enabled)
         else getString(R.string.permission_disabled)
         binding.tvBatteryOptimization.setTextColor(
-            if (ignoring) resources.getColor(android.R.color.holo_green_dark)
-            else resources.getColor(android.R.color.holo_red_dark)
+            if (ignoring) ContextCompat.getColor(requireContext(), android.R.color.holo_green_dark)
+            else ContextCompat.getColor(requireContext(), android.R.color.holo_red_dark)
         )
     }
 

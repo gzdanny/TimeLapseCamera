@@ -216,7 +216,8 @@ class CaptureService : Service() {
                     // 写入磁盘也可能失败（磁盘满、IO 错误等）
                     // 失败了就打 Log，不崩溃，等下一轮继续（释放资源是关键）
                     runCatching {
-                        storage.save(bitmapToSave!!, timestamp)
+                        val bmp = bitmapToSave ?: throw RuntimeException("bitmapToSave 应为非 null")
+                        storage.save(bmp, timestamp)
                     }.onSuccess {
                         if (result is CaptureResult.Success) {
                             config = config.copy(

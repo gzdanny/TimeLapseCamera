@@ -10,7 +10,6 @@ import android.util.DisplayMetrics
 import android.util.Size
 import android.view.WindowManager
 import androidx.camera.camera2.interop.Camera2CameraInfo
-import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
@@ -51,7 +50,6 @@ import kotlin.coroutines.resume
  * - LifecycleRegistry 手动管理生命周期（Service 不是 LifecycleOwner，需要自己造一个）
  * - 按 cameraId 选摄像头，而非粗粒度的 facing（多镜头设备精确到具体镜头）
  */
-@OptIn(ExperimentalCamera2Interop::class)
 class CameraXController(
     private val context: Context,
     private val cameraId: String,
@@ -154,10 +152,10 @@ class CameraXController(
                 //    低端机不加此步骤容易出现黑屏/模糊，官方文档推荐先对焦再拍摄
                 //    使用 SurfaceOrientedMeteringPointFactory + WindowManager，息屏时安全兜底
                 try {
-                    val metrics = DisplayMetrics().also {
-                        (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
-                            .defaultDisplay.getMetrics(it)
-                    }
+                    // DisplayMetrics 仅作为尺寸容器使用，不参与 deprecated 的 Display API
+                    val metrics = DisplayMetrics()
+                    (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
+                        ?.defaultDisplay?.getRealMetrics(metrics)
                     val pointFactory = SurfaceOrientedMeteringPointFactory(
                         metrics.widthPixels.toFloat().coerceAtLeast(1f),
                         metrics.heightPixels.toFloat().coerceAtLeast(1f)

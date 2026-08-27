@@ -6,6 +6,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.timelapse.camera.R
 import com.timelapse.camera.config.CaptureConfig
@@ -109,8 +110,8 @@ class StatusFragment : Fragment() {
                 binding.tvStatus.text = if (isRunning) getString(R.string.status_running)
                 else getString(R.string.status_stopped)
                 binding.tvStatus.setTextColor(
-                    if (isRunning) resources.getColor(android.R.color.holo_green_dark)
-                    else resources.getColor(android.R.color.darker_gray)
+                    if (isRunning) ContextCompat.getColor(requireContext(), android.R.color.holo_green_dark)
+                    else ContextCompat.getColor(requireContext(), android.R.color.darker_gray)
                 )
                 binding.btnToggle.text = if (isRunning) getString(R.string.btn_stop)
                 else getString(R.string.btn_start)
@@ -145,8 +146,8 @@ class StatusFragment : Fragment() {
         binding.tvStatus.text = if (isRunning) getString(R.string.status_running)
         else getString(R.string.status_stopped)
         binding.tvStatus.setTextColor(
-            if (isRunning) resources.getColor(android.R.color.holo_green_dark)
-            else resources.getColor(android.R.color.darker_gray)
+            if (isRunning) ContextCompat.getColor(requireContext(), android.R.color.holo_green_dark)
+            else ContextCompat.getColor(requireContext(), android.R.color.darker_gray)
         )
 
         // 按钮
