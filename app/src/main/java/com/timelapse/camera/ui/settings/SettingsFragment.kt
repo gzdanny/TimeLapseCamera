@@ -45,6 +45,10 @@ class SettingsFragment : Fragment() {
     private lateinit var config: CaptureConfig
     /** 枚举到的所有摄像头信息，用于填充下拉列表 */
     private var cameraList: List<CameraEnumerator.CameraInfo> = emptyList()
+    /** 当前摄像头的可用分辨率选项 */
+    private var resolutionOptions: List<String> = emptyList()
+    /** 分辨率下拉适配器 */
+    private var resolutionAdapter: ArrayAdapter<String>? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

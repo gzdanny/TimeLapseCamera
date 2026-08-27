@@ -29,8 +29,8 @@
 
     <!-- 预览页 -->
     <string name="btn_test_capture">立即拍一张</string>
-    <string name="preview_capture_hint">试拍保存为 Test.jpg，与正式拍摄使用相同管线</string>
-    <string name="preview_test_saved">已保存为 Test.jpg，可在相册查看</string>
+    <string name="preview_capture_hint">试拍保存为带时间戳的jpg文件，与正式拍摄使用相同管线</string>
+    <string name="preview_test_saved">试拍成功，可在相册查看</string>
     <string name="preview_test_fail">试拍失败</string>
 
     <!-- 相册页 -->

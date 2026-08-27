@@ -66,7 +66,8 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
     }
 
     override suspend fun saveTestPhoto(bitmap: Bitmap): String = withContext(Dispatchers.IO) {
-        val fileName = "Test.jpg"
+        val fileName = SimpleDateFormat("yyyy-MM-dd_HHmmss_SSS", Locale.getDefault())
+            .format(Date(System.currentTimeMillis())) + ".jpg"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             saveTestViaMediaStore(bitmap, fileName)
         } else {
@@ -120,8 +121,8 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
     }
 
     /**
-     * 通过 MediaStore 写入试拍照片（固定文件名 Test.jpg，覆盖已有）。
-     * 查找已有 Test.jpg 并复用其 Uri，无则新建。
+     * 通过 MediaStore 写入试拍照片（文件名带时间戳，如 2026-08-28_143025_123.jpg）。
+     * 每次生成唯一文件名，不复用旧 Uri。
      */
     private fun saveTestViaMediaStore(bitmap: Bitmap, fileName: String): String {
         val values = ContentValues().apply {

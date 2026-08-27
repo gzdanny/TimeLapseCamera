@@ -58,7 +58,9 @@ class LocalPhotoStorage(
     }
 
     override suspend fun saveTestPhoto(bitmap: Bitmap): String = withContext(Dispatchers.IO) {
-        val file = File(baseDir, "Test.jpg")
+        val fileName = SimpleDateFormat("yyyy-MM-dd_HHmmss_SSS", Locale.getDefault())
+            .format(Date(System.currentTimeMillis())) + ".jpg"
+        val file = File(baseDir, fileName)
         FileOutputStream(file).use { out ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
         }

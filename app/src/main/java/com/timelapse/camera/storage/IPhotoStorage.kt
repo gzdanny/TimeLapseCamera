@@ -26,8 +26,7 @@ interface IPhotoStorage {
     suspend fun save(bitmap: Bitmap, timestamp: Long): String
 
     /**
-     * 保存试拍照片（固定文件名 Test.jpg，每次覆盖）。
-     * 与 save() 走相同的存储路径，但不按时间归档，方便用户快速定位检查。
+     * 保存试拍照片（文件名带日期时间戳，格式 yyyy-MM-dd_HHmmss_SSS.jpg，每次不覆盖）。
      * @param bitmap 带水印的试拍照片
      * @return 保存后的文件路径
      */

@@ -1,6 +1,5 @@
 package com.timelapse.camera.util
 
-import android.content.Context
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -32,15 +31,14 @@ object LogBuffer {
      * 初始化日志文件路径，并从文件加载历史日志。
      * 应在 CaptureService.onCreate 和 StatusFragment.onCreate 中调用。
      * 重复调用安全（仅第一次生效）。
+     *
+     * @param logFileDir 日志文件所在目录（通常传入 storage.getPhotoDir()，与照片同目录）
      */
-    fun init(context: Context) {
+    fun init(logFileDir: File) {
         if (initialized) return
         synchronized(logs) {
             if (initialized) return
-            // 写在外部文件目录，用户可通过文件管理器访问（无需 Root）
-            val dir = context.getExternalFilesDir(null)
-                ?: throw IllegalStateException("无法获取外部文件目录")
-            logFile = File(dir, "timelapse_log.txt")
+            logFile = File(logFileDir, "timelapse_log.txt")
             if (logFile!!.exists()) {
                 runCatching {
                     logFile!!.readLines().takeLast(MAX_SIZE).forEach { logs.add(it) }
