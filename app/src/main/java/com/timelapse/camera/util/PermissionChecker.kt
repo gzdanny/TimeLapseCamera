@@ -82,7 +82,7 @@ object PermissionChecker {
         return pm.isIgnoringBatteryOptimizations(context.packageName)
     }
 
-    fun batteryOptimizationIntent(): Intent =
+    fun batteryOptimizationIntent(context: Context): Intent =
         Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
 
     // ──────────── 应用详情页（兜底跳转） ────────────

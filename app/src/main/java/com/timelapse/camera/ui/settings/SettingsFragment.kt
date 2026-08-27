@@ -357,7 +357,7 @@ class SettingsFragment : Fragment() {
             startActivity(PermissionChecker.exactAlarmSettingsIntent(requireContext()))
         }
         binding.rowBatteryOptimization.setOnClickListener {
-            startActivity(PermissionChecker.batteryOptimizationIntent())
+            startActivity(PermissionChecker.batteryOptimizationIntent(requireContext()))
         }
         binding.rowAppDetails.setOnClickListener {
             startActivity(PermissionChecker.appDetailsIntent(requireContext()))
@@ -468,7 +468,6 @@ class SettingsFragment : Fragment() {
 
     // ──────────── 权限状态刷新 ────────────
 
-    @Suppress("DEPRECATION")
     private fun refreshPermissionStatus() {
         // 相机权限
         val cameraGranted = PermissionChecker.hasCameraPermission(requireContext())
