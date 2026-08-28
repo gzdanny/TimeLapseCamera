@@ -54,7 +54,11 @@ import kotlin.coroutines.resume
 class CameraXController(
     private val context: Context,
     private val cameraId: String,
-    /** 用户设定的拍摄方向（0/90/180/270），直接传给 setTargetRotation，不再动态读取屏幕方向 */
+    /**
+     * 用户设定的拍摄方向，值为 Surface.ROTATION_* 枚举常量（0/1/2/3），
+     * 直接传给 setTargetRotation，与 CameraX 值域一致，无转换。
+     * 注意：不是角度值（90° 是 ROTATION_90 = 1，而非 90）。
+     */
     private val shotRotation: Int,
     /** 用户选择的拍摄分辨率，null 表示用摄像头最高分辨率 */
     private val resolution: Size?

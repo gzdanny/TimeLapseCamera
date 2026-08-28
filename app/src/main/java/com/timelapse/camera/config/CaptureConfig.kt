@@ -3,6 +3,7 @@ package com.timelapse.camera.config
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Size
+import android.view.Surface
 
 /**
  * 存储位置枚举。
@@ -55,8 +56,12 @@ data class CaptureConfig(
     val lastCaptureTime: Long = 0,
     /** 照片存储位置 */
     val storageLocation: StorageLocation = StorageLocation.APP_PRIVATE,
-    /** 拍摄方向：0=竖屏, 90=横屏(默认), 180=倒立, 270=横屏反 */
-    val shotRotation: Int = 90,
+    /**
+     * 拍摄方向：内部直接使用 Surface.ROTATION_* 枚举常量（0/1/2/3），
+     * 与 setTargetRotation() 的值域一致，无需任何转换。
+     * 度数只存在于设置页的显示文案（人类阅读），代码中不出现。
+     */
+    val shotRotation: Int = Surface.ROTATION_90,
     /** 拍摄分辨率（"WxH" 格式），null 表示用摄像头最高分辨率 */
     val resolution: String? = null,
     /** FIFO 清理阈值（GB）：剩余空间低于此值时触发清理 */
@@ -128,7 +133,7 @@ data class CaptureConfig(
                 lastRemoteInterval = prefs.getInt(KEY_LAST_REMOTE_INTERVAL, 0),
                 lastCaptureTime = prefs.getLong(KEY_LAST_CAPTURE_TIME, 0),
                 storageLocation = StorageLocation.fromName(prefs.getString(KEY_STORAGE_LOCATION, null)),
-                shotRotation = prefs.getInt(KEY_SHOT_ROTATION, 90),
+                shotRotation = prefs.getInt(KEY_SHOT_ROTATION, Surface.ROTATION_90),
                 resolution = prefs.getString(KEY_RESOLUTION, null),
                 storageThresholdGb = prefs.getFloat(KEY_STORAGE_THRESHOLD, 1.0f),
                 storageSafeLineGb = prefs.getFloat(KEY_STORAGE_SAFE_LINE, 2.0f)

@@ -127,9 +127,8 @@ class SettingsFragment : Fragment() {
             binding.spinnerCamera.setSelection(cameraIndex)
         }
 
-        // 拍摄方向（0/90/180/270 对应 4 个选项）
-        val rotationIndex = listOf(0, 90, 180, 270).indexOf(config.shotRotation).takeIf { it >= 0 } ?: 1
-        binding.spinnerShotRotation.setSelection(rotationIndex)
+        // 拍摄方向：下拉下标 = Surface.ROTATION_* 枚举值（0-3），直存直取，零转换
+        binding.spinnerShotRotation.setSelection(config.shotRotation.coerceIn(0, 3))
 
         // 拍摄分辨率：用已保存的分辨率选中的项，没有则默认第一项
         refreshResolutionSpinner()
@@ -277,9 +276,9 @@ class SettingsFragment : Fragment() {
         binding.spinnerShotRotation.onItemSelectedListener =
             object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                    val rotation = listOf(0, 90, 180, 270)[pos]
-                    if (config.shotRotation != rotation) {
-                        config = config.copy(shotRotation = rotation)
+                    // pos 即 Surface.ROTATION_* 枚举值（0-3）
+                    if (config.shotRotation != pos) {
+                        config = config.copy(shotRotation = pos)
                         config.save(requireContext())
                     }
                 }
