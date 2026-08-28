@@ -190,66 +190,65 @@ class CaptureService : Service() {
 
                 // ── 2. 拍摄 ──
                 // WakeLock 已由服务启动时持有（防止息屏秒睡），此处只需正常拍摄
+                // 拍摄段异常由外层 catch(Throwable) 统一捕获：bitmapToSave 尚未赋值时无需回收
                 val timestamp = System.currentTimeMillis()
+                LogBuffer.log("I", TAG, "开始拍摄 #${config.captureCount + 1}")
+                val camera: ICameraController = CameraXController(
+                    applicationContext,
+                    config.cameraId,
+                    config.shotRotation,
+                    CaptureConfig.parseResolution(config.resolution)
+                )
+                val result = camera.capture()
+                LogBuffer.log("I", TAG, "拍摄结果: ${if (result is CaptureResult.Success) "成功" else "失败: ${(result as CaptureResult.Failure).message}"}")
+
+                // 拍摄成功：加水印 + 存盘；拍摄失败：生成黑图占位 + 存盘
+                // 优化：所有水印内容全关时直接跳过水印，零额外内存
+                val hasWatermark = !config.watermarkText.isNullOrBlank() ||
+                        config.watermarkShowBattery ||
+                        config.watermarkShowStorage ||
+                        config.watermarkShowTemperature
+
+                // when 对 CaptureResult（密封类）穷尽匹配，两分支均产出非 null Bitmap
+                val bitmapToSave: Bitmap = when (result) {
+                    is CaptureResult.Success -> {
+                        if (hasWatermark) {
+                            LogBuffer.log("I", TAG, "开始水印处理")
+                            val watermarkOptions = buildWatermarkOptions(config)
+                            watermarkProcessor.apply(result.bitmap, result.timestamp, watermarkOptions)
+                        } else {
+                            LogBuffer.log("I", TAG, "水印全关，跳过水印处理")
+                            result.bitmap
+                        }
+                    }
+                    is CaptureResult.Failure -> {
+                        LogBuffer.log("E", TAG, "拍摄失败: ${result.message}")
+                        watermarkProcessor.createErrorBitmap(timestamp)
+                    }
+                }
+
+                // 写入磁盘也可能失败（磁盘满、IO 错误等）
+                // 失败了就打 Log，不崩溃，等下一轮继续（释放资源是关键）
+                // Bitmap 生命周期闭环：无论存盘成功与否，统一回收，杜绝泄漏
                 try {
-                    LogBuffer.log("I", TAG, "开始拍摄 #${config.captureCount + 1}")
-                    val camera: ICameraController = CameraXController(
-                        applicationContext,
-                        config.cameraId,
-                        config.shotRotation,
-                        CaptureConfig.parseResolution(config.resolution)
-                    )
-                    val result = camera.capture()
-                    LogBuffer.log("I", TAG, "拍摄结果: ${if (result is CaptureResult.Success) "成功" else "失败: ${(result as CaptureResult.Failure).message}"}")
-
-                    // 拍摄成功：加水印 + 存盘；拍摄失败：生成黑图占位 + 存盘
-                    // 优化：所有水印内容全关时直接跳过水印，零额外内存
-                    val hasWatermark = !config.watermarkText.isNullOrBlank() ||
-                            config.watermarkShowBattery ||
-                            config.watermarkShowStorage ||
-                            config.watermarkShowTemperature
-
-                    // when 对 CaptureResult（密封类）穷尽匹配，两分支均产出非 null Bitmap
-                    val bitmapToSave: Bitmap = when (result) {
-                        is CaptureResult.Success -> {
-                            if (hasWatermark) {
-                                LogBuffer.log("I", TAG, "开始水印处理")
-                                val watermarkOptions = buildWatermarkOptions(config)
-                                watermarkProcessor.apply(result.bitmap, result.timestamp, watermarkOptions)
-                            } else {
-                                LogBuffer.log("I", TAG, "水印全关，跳过水印处理")
-                                result.bitmap
-                            }
+                    runCatching {
+                        storage.save(bitmapToSave, timestamp)
+                    }.onSuccess {
+                        if (result is CaptureResult.Success) {
+                            // 局部更新：只写拍摄进度的 key，避免全量 save 覆盖用户刚改的其他配置。
+                            // lastCaptureTime 在拍摄成功后才更新（UI 据此推算倒计时，拍完起算更准确）
+                            val newCount = config.captureCount + 1
+                            CaptureConfig.updateCaptureProgress(applicationContext, newCount, timestamp)
+                            config = config.copy(captureCount = newCount, lastCaptureTime = timestamp)
+                            LogBuffer.log("I", TAG, "拍摄完成 #$newCount")
+                        } else {
+                            LogBuffer.log("W", TAG, "拍摄失败，已保存黑图占位")
                         }
-                        is CaptureResult.Failure -> {
-                            LogBuffer.log("E", TAG, "拍摄失败: ${result.message}")
-                            watermarkProcessor.createErrorBitmap(timestamp)
-                        }
+                    }.onFailure { e ->
+                        LogBuffer.log("E", TAG, "写入磁盘失败: ${e.message}")
                     }
-
-                    // 写入磁盘也可能失败（磁盘满、IO 错误等）
-                    // 失败了就打 Log，不崩溃，等下一轮继续（释放资源是关键）
-                    // Bitmap 生命周期闭环：无论存盘成功与否，统一回收，杜绝泄漏
-                    try {
-                        runCatching {
-                            storage.save(bitmapToSave, timestamp)
-                        }.onSuccess {
-                            if (result is CaptureResult.Success) {
-                                // 局部更新：只写拍摄进度的 key，避免全量 save 覆盖用户刚改的其他配置。
-                                // lastCaptureTime 在拍摄成功后才更新（UI 据此推算倒计时，拍完起算更准确）
-                                val newCount = config.captureCount + 1
-                                CaptureConfig.updateCaptureProgress(applicationContext, newCount, timestamp)
-                                config = config.copy(captureCount = newCount, lastCaptureTime = timestamp)
-                                LogBuffer.log("I", TAG, "拍摄完成 #$newCount")
-                            } else {
-                                LogBuffer.log("W", TAG, "拍摄失败，已保存黑图占位")
-                            }
-                        }.onFailure { e ->
-                            LogBuffer.log("E", TAG, "写入磁盘失败: ${e.message}")
-                        }
-                    } finally {
-                        bitmapToSave.recycle()
-                    }
+                } finally {
+                    bitmapToSave.recycle()
                 }
 
                 // ── 3. 更新倒计时通知（系统自动渲染，零功耗）──
