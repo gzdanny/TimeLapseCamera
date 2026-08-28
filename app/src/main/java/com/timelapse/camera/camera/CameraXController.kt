@@ -68,26 +68,26 @@ class CameraXController(
     private var lifecycleRegistry: LifecycleRegistry? = null
     private var lifecycleOwner: LifecycleOwner? = null
 
-    override suspend fun capture(): CaptureResult {
+    override suspend fun capture(): CaptureResult = CameraMutex.withLock {
         LogBuffer.log("I", TAG, "开始拍摄, cameraId=$cameraId")
         val result = captureWithCameraId(cameraId)
-        if (result is CaptureResult.Success) return result
+        if (result is CaptureResult.Success) return@withLock result
 
         // 失败了尝试同方向其他摄像头作为备用
         val fallbackId = findFallbackCameraId(cameraId)
         if (fallbackId != null) {
             LogBuffer.log("W", TAG, "主镜头失败，切换备用镜头 cameraId=$fallbackId")
             val fallbackResult = captureWithCameraId(fallbackId)
-            if (fallbackResult is CaptureResult.Success) return fallbackResult
+            if (fallbackResult is CaptureResult.Success) return@withLock fallbackResult
 
             val firstMsg = (result as? CaptureResult.Failure)?.message ?: "未知错误"
             val secondMsg = (fallbackResult as? CaptureResult.Failure)?.message ?: "未知错误"
-            return CaptureResult.Failure(
+            return@withLock CaptureResult.Failure(
                 "主镜头失败: $firstMsg；备用镜头失败: $secondMsg"
             )
         }
 
-        return result
+        result
     }
 
     /**
@@ -186,25 +186,27 @@ class CameraXController(
      * 执行拍照并解码为 mutable Bitmap。
      * ImageCapture.takePicture 是回调 API，转为挂起函数。
      *
+     * 线程模型：回调内只在主线程做字节拷贝（内存 memcpy，微秒级）并立即
+     * close ImageProxy；JPEG 解码（12-48MB，百毫秒级）切到 IO 线程，
+     * 避免试拍等 UI 场景下阻塞主线程造成卡顿。
+     *
      * 不做像素旋转：JPEG 的 EXIF 方向信息由 CameraX 写入，系统相册会自动旋转显示。
      * 这样节省内存（不需要创建第二个 Bitmap），也保证方向一致性。
      */
-    private suspend fun takePictureAndDecode(): Bitmap =
-        suspendCancellableCoroutine { cont ->
+    private suspend fun takePictureAndDecode(): Bitmap {
+        val bytes = suspendCancellableCoroutine { cont ->
             LogBuffer.log("I", TAG, "takePicture 调用")
             imageCapture?.takePicture(
                 ContextCompat.getMainExecutor(context),
                 object : ImageCapture.OnImageCapturedCallback() {
                     override fun onCaptureSuccess(image: ImageProxy) {
                         LogBuffer.log("I", TAG, "onCaptureSuccess 回调")
-                        if (!cont.isActive) {
-                            image.close()
-                            return
-                        }
-                        runCatching { imageToBitmap(image) }
-                            .onSuccess { cont.resume(it) }
-                            .onFailure { cont.cancel(it) }
+                        // 主线程只做字节拷贝，解码放 IO 线程
+                        val buffer = image.planes[0].buffer
+                        val data = ByteArray(buffer.remaining())
+                        buffer.get(data)
                         image.close()
+                        if (cont.isActive) cont.resume(data)
                     }
 
                     override fun onError(exception: ImageCaptureException) {
@@ -217,23 +219,18 @@ class CameraXController(
                 cont.cancel(IllegalStateException("imageCapture 未初始化"))
             }
         }
+        return withContext(Dispatchers.IO) { decodeBytes(data = bytes) }
+    }
 
     /**
-     * 将 ImageProxy 转为 mutable Bitmap。
+     * 将 JPEG 字节流解码为 mutable Bitmap。
      * inMutable=true 保证后续水印模块可直接在 Bitmap 上绘制，零额外内存。
-     *
-     * 注意：不做像素旋转。EXIF 方向信息已包含在 JPEG 中，系统相册自动旋转显示。
-     * 水印画在原始方向上，随整张图一起被系统旋转，用户看到的水印也是正的。
      */
-    private fun imageToBitmap(image: ImageProxy): Bitmap {
-        val buffer = image.planes[0].buffer
-        val bytes = ByteArray(buffer.remaining())
-        buffer.get(bytes)
-
+    private fun decodeBytes(data: ByteArray): Bitmap {
         val options = BitmapFactory.Options().apply {
             inMutable = true
         }
-        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        return BitmapFactory.decodeByteArray(data, 0, data.size, options)
             ?: throw RuntimeException("JPEG 解码失败")
     }
 
@@ -243,6 +240,11 @@ class CameraXController(
      * 为什么不用 CameraX 自带的？
      * - CameraX 默认不选传感器最高分辨率
      * - 需要从底层 Camera2 API 查询真实能力，再回设给 CameraX
+     *
+     * 注意：返回值直接原样传给 ResolutionStrategy，禁止按旋转角手动对调宽高——
+     * getOutputSizes(JPEG) 返回的已是 HAL 考虑旋转后的可用尺寸，手动对调会因
+     * aspect ratio 不匹配触发 "No available output size" 错误（早期实测踩坑）。
+     * 方向修正是 EXIF 的职责，相册读取时自动旋转。
      */
     private fun getMaxJpegSize(cameraId: String): Size {
         val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager

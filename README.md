@@ -102,7 +102,9 @@ app/src/main/java/com/timelapse/camera/
 │
 ├── camera/                       # ── 相机模块 ──
 │   ├── ICameraController.kt      #   接口：capture() → CaptureResult
-│   └── CameraXController.kt      #   CameraX 实现 (每次拍完即释放摄像头)
+│   ├── CameraXController.kt     #   CameraX 实现 (每次拍完即释放摄像头)
+│   ├── CameraEnumerator.kt       #   摄像头枚举（Camera2：ID/方向/像素/焦距）
+│   └── CameraMutex.kt            #   进程级相机互斥锁（拍摄与预览排队）
 │
 ├── watermark/                    # ── 水印模块 ──
 │   ├── WatermarkOptions.kt       #   水印配置 data class（显示哪些信息）
@@ -436,28 +438,23 @@ override fun onDestroy() {
   → 结果：照片被强制裁切成错误的宽高比
 ```
 
-**正确做法**：每次拍摄前动态读取旋转角，并根据旋转角对调分辨率的长宽：
+**正确做法**：把 `getOutputSizes(JPEG)` 返回的最大尺寸**原样**传给 `ResolutionStrategy`，不要在 Java 层根据旋转角对调长宽：
 
 ```kotlin
-// 获取当前设备旋转角
-val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-val rotation = wm.defaultDisplay.rotation  // 0/90/180/270
-
-// 竖屏时对调宽高
-val adjustedSize = if (rotation == ROTATION_90 || rotation == ROTATION_270) {
-    Size(rawSize.height, rawSize.width)  // 4208×3120 → 3120×4208
-} else {
-    rawSize
-}
-
-ImageCapture.Builder()
-    .setTargetRotation(rotation)      // ← 让 CameraX 知道当前方向
-    .setResolutionSelector(...)       // ← 用调整后的尺寸
-    .build()
+// rawMaxSize = getOutputSizes(JPEG) 中的最大项，直接使用，不对调宽高
+ResolutionStrategy(rawMaxSize, ResolutionStrategy.FALLBACK_RULE_NONE)
 ```
 
-这就是为什么 `CameraXController.kt` 中有 `getAdjustedSizeAndRotation()` 方法，
-它实时读取旋转角并调整目标分辨率，确保无论手机怎么转，输出都是正确的尺寸。
+**为什么不能手动对调尺寸？** `getOutputSizes()` 返回的是 Camera HAL 抽象层给出的
+已考虑旋转的可用尺寸列表，手动对调会导致 aspect ratio 与实际输出不匹配，
+触发 "No available output size" 错误（本项目早期实测踩过这个坑）。
+
+方向修正交给 EXIF：CameraX 把方向信息写入 JPEG 元数据，系统相册显示时自动
+旋转，App 层无需干预。
+
+> 勘误注记：本节早期版本曾记载"按旋转角对调长宽"的做法并提及
+> `getAdjustedSizeAndRotation()` 方法——那是已被证伪的错误方案，相关代码
+> 早已删除，此处按现行实现改写。
 
 ### 问题三：通知在锁屏不可见
 

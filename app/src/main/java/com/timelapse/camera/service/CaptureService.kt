@@ -26,12 +26,12 @@ import com.timelapse.camera.util.BatteryMonitor
 import com.timelapse.camera.util.LogBuffer
 import com.timelapse.camera.watermark.WatermarkOptions
 import com.timelapse.camera.watermark.WatermarkProcessor
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -51,12 +51,14 @@ import kotlinx.coroutines.withContext
  * 2. START_STICKY —— 被杀后系统尽量重启
  * 3. AlarmManager 备份 —— 每次拍摄后设闹钟，服务被杀则闹钟重启
  *
- * WakeLock 策略：服务启动时持有，贯穿整个运行期，防止息屏时 CPU 秒睡导致服务被杀。
- * onDestroy 时释放，避免电池耗尽。
+ * WakeLock 策略（实测调整）：
+ * 原设计「间隔期深度睡眠节能、拍摄瞬间短暂唤醒」在部分实体设备（国产 OS）上
+ * 被证伪：息屏后 CPU 完全无法可靠唤醒，闹钟链路也不可靠，拍摄时序彻底失控。
+ * 现改为：运行期全程持有 PARTIAL_WAKE_LOCK（无超时），牺牲间隔期功耗
+ * 换取拍摄时序的绝对可靠。锁随服务启动持有，onDestroy 无条件释放。
  *
  * 教学要点：
  * - setChronometerCountDown(true) 让系统自动渲染倒计时，App 无需定时刷新通知
- * - WakeLock 全程持有确保息屏也能稳定拍摄，代价是间隔期 CPU 不进入深度睡眠
  * - withContext(NonCancellable) 确保 stopForeground/stopSelf 在协程取消后仍执行
  */
 class CaptureService : Service() {
@@ -103,6 +105,8 @@ class CaptureService : Service() {
                     .save(applicationContext)
                 CaptureScheduler.get(applicationContext).cancel()
                 captureJob?.cancel()
+                // 同步停止守护服务：用户主动停止后无需再保活，避免常驻通知和空转耗电
+                stopService(Intent(applicationContext, WatchdogService::class.java))
                 // 不立即 stopSelf，让 captureLoop 的 finally 块优雅退出
                 return START_NOT_STICKY
             }
@@ -118,11 +122,20 @@ class CaptureService : Service() {
                 LogBuffer.log("I", TAG, "服务启动 [来源=$restartSource]，间隔 ${config.intervalSeconds}s")
                 val initialDelay = if (config.lastRemoteInterval > 0)
                     config.lastRemoteInterval else config.intervalSeconds
-                startForeground(NOTIFICATION_ID, buildNotification(initialDelay))
+                // Android 12+ 后台启动前台服务 / Android 14 camera type 缺 CAMERA 权限时
+                // startForeground 会抛异常；闹钟重启场景 App 可能正处于后台，必须兜底
+                try {
+                    startForeground(NOTIFICATION_ID, buildNotification(initialDelay))
+                } catch (e: Exception) {
+                    LogBuffer.log("E", TAG, "启动前台服务失败: ${e.javaClass.simpleName}: ${e.message}")
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
 
                 if (captureJob == null || !captureJob!!.isActive) {
                     LogBuffer.log("I", TAG, "拍摄服务启动，间隔 ${config.intervalSeconds}s")
-                    // 开机保活：持有 WakeLock 贯穿整个服务运行期，防止息屏时 CPU 秒睡导致服务被杀
+                    // 开机保活：持有 WakeLock 贯穿整个服务运行期（无超时），防止国产 OS 息屏深度睡眠后
+                    // CPU 无法唤醒导致拍摄时序失控（实测教训，见类头注释）
                     acquireWakeLock()
                     captureJob = serviceScope.launch { captureLoop() }
                 }
@@ -167,8 +180,9 @@ class CaptureService : Service() {
                     if (remoteDelay != null) {
                         nextDelay = remoteDelay
                         LogBuffer.log("I", TAG, "远程配置: 间隔=${remoteDelay}s")
+                        // 局部更新：只写远程间隔的 key，避免全量 save 覆盖用户刚改的其他配置
+                        CaptureConfig.updateRemoteInterval(applicationContext, remoteDelay)
                         config = config.copy(lastRemoteInterval = remoteDelay)
-                        config.save(applicationContext)
                     } else if (config.lastRemoteInterval > 0) {
                         nextDelay = config.lastRemoteInterval
                     }
@@ -220,12 +234,12 @@ class CaptureService : Service() {
                         storage.save(bmp, timestamp)
                     }.onSuccess {
                         if (result is CaptureResult.Success) {
-                            config = config.copy(
-                                captureCount = config.captureCount + 1,
-                                lastCaptureTime = timestamp
-                            )
-                            config.save(applicationContext)
-                            LogBuffer.log("I", TAG, "拍摄完成 #${config.captureCount}")
+                            // 局部更新：只写拍摄进度的 key，避免全量 save 覆盖用户刚改的其他配置。
+                            // lastCaptureTime 在拍摄成功后才更新（UI 据此推算倒计时，拍完起算更准确）
+                            val newCount = config.captureCount + 1
+                            CaptureConfig.updateCaptureProgress(applicationContext, newCount, timestamp)
+                            config = config.copy(captureCount = newCount, lastCaptureTime = timestamp)
+                            LogBuffer.log("I", TAG, "拍摄完成 #$newCount")
                         } else {
                             LogBuffer.log("W", TAG, "拍摄失败，已保存黑图占位")
                         }
@@ -277,12 +291,21 @@ class CaptureService : Service() {
 
     // ────────────────── WakeLock ──────────────────
 
+    /**
+     * 无超时持有 PARTIAL_WAKE_LOCK，贯穿整个服务运行期。
+     *
+     * 为什么不用带超时的 acquire(timeout)？
+     * - 早期版本用 acquire(59s)，实测国产 OS 息屏深度睡眠后 CPU 完全无法唤醒，
+     *   拍摄间隔 >59s 时时序彻底失控
+     * - 无超时锁的释放责任完全在 onDestroy()，务必确保该路径可靠
+     */
     private fun acquireWakeLock() {
+        releaseWakeLock() // 先释放旧实例，防止闹钟重启路径覆盖引用导致旧锁泄漏
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "TimeLapseCamera:Capture"
-        ).apply { acquire(59_000) }
+        ).apply { acquire() }
     }
 
     private fun releaseWakeLock() {
@@ -329,6 +352,8 @@ class CaptureService : Service() {
         val nextTime = System.currentTimeMillis() + nextDelaySeconds * 1000L
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_camera)
+            .setContentTitle(getString(R.string.notif_capture_title))
+            .setContentText(getString(R.string.notif_capture_countdown))
             .setOngoing(true)
             // PRIORITY_HIGH 是锁屏显示的前提条件；VISIBILITY_PUBLIC 强制在锁屏上可见
             .setPriority(NotificationCompat.PRIORITY_HIGH)

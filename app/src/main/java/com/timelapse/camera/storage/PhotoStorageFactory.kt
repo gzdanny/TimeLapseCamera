@@ -48,10 +48,8 @@ object PhotoStorageFactory {
 
     /**
      * 判断目录是否在内部存储上。
-     * 内部存储路径以 /storage/emulated/0 开头。
+     * 用系统 API 而非路径前缀匹配：路径匹配在 adopted storage 等场景会误判。
      */
-    private fun isInternalStorage(dir: File): Boolean {
-        val internal = Environment.getExternalStorageDirectory().absolutePath
-        return dir.absolutePath.startsWith(internal)
-    }
+    private fun isInternalStorage(dir: File): Boolean =
+        !Environment.isExternalStorageRemovable(dir)
 }

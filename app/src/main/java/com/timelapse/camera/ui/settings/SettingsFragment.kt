@@ -8,6 +8,8 @@ import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import androidx.fragment.app.Fragment
 import com.timelapse.camera.R
+import android.content.pm.PackageManager
+import android.os.Build
 import com.timelapse.camera.camera.CameraEnumerator
 import com.timelapse.camera.config.CaptureConfig
 import com.timelapse.camera.config.StorageLocation
@@ -70,6 +72,31 @@ class SettingsFragment : Fragment() {
         setupStorageLocationSpinner()
         loadConfigToUI()
         setupListeners()
+        setupVersionDisplay()
+    }
+
+    /**
+     * 版本号动态读取：避免 strings.xml 与 build.gradle 双处维护不同步。
+     *
+     * 为什么不用 BuildConfig.VERSION_NAME？
+     * - 项目未启用 buildFeatures.buildConfig（AGP 8 默认关闭），
+     *   启用反而多一层配置；PackageManager 是零配置的标准途径
+     * - getPackageInfo 在 API 33 换了带 PackageInfoFlags 的重载，需分支处理
+     */
+    private fun setupVersionDisplay() {
+        val versionName = runCatching {
+            val pm = requireContext().packageManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getPackageInfo(
+                    requireContext().packageName,
+                    PackageManager.PackageInfoFlags.of(0)
+                ).versionName
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(requireContext().packageName, 0).versionName
+            }
+        }.getOrNull()
+        binding.tvVersion.text = getString(R.string.settings_version, versionName ?: "unknown")
     }
 
     override fun onResume() {

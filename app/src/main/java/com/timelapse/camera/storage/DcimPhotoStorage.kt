@@ -1,6 +1,5 @@
 package com.timelapse.camera.storage
 
-import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
@@ -58,21 +57,26 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
         val fileName = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
             .format(Date(timestamp)) + ".jpg"
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val path = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             saveViaMediaStore(bitmap, fileName, monthDir)
         } else {
             saveViaFileApi(bitmap, fileName, monthDir)
         }
+        invalidateListCache()
+        path
     }
 
     override suspend fun saveTestPhoto(bitmap: Bitmap): String = withContext(Dispatchers.IO) {
-        val fileName = SimpleDateFormat("yyyy-MM-dd_HHmmss_SSS", Locale.getDefault())
+        // 文件名格式与正式照片对齐（yyyyMMdd_HHmmss_SSS），保证相册字典序 = 时间序
+        val fileName = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.getDefault())
             .format(Date(System.currentTimeMillis())) + ".jpg"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val path = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             saveTestViaMediaStore(bitmap, fileName)
         } else {
             saveTestViaFileApi(bitmap, fileName)
         }
+        invalidateListCache()
+        path
     }
 
     // ──────────── API 29+：MediaStore 写入 ────────────
@@ -102,9 +106,16 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
         val uri = context.contentResolver.insert(collection, values)
             ?: throw IOException("MediaStore insert 失败")
 
-        context.contentResolver.openOutputStream(uri)?.use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-        } ?: throw IOException("打开输出流失败")
+        try {
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+            } ?: throw IOException("打开输出流失败")
+        } catch (e: Exception) {
+            // 写入失败：删除孤儿记录，避免 IS_PENDING=1 的空条目遗留在相册（Android 10+ 保留至多 7 天）
+            runCatching { context.contentResolver.delete(uri, null, null) }
+                .onFailure { Log.w(TAG, "孤儿记录清理失败: ${it.message}") }
+            throw e
+        }
         // bitmap 由 CaptureService 统一 recycle，此处不回收
 
         // IS_PENDING=0：通知媒体扫描器此文件可被系统相册索引
@@ -121,8 +132,7 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
     }
 
     /**
-     * 通过 MediaStore 写入试拍照片（文件名带时间戳，如 2026-08-28_143025_123.jpg）。
-     * 每次生成唯一文件名，不复用旧 Uri。
+     * 通过 MediaStore 写入试拍照片（文件名带毫秒时间戳，每次唯一，不复用旧 Uri）。
      */
     private fun saveTestViaMediaStore(bitmap: Bitmap, fileName: String): String {
         val values = ContentValues().apply {
@@ -135,13 +145,19 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
         val collection = MediaStore.Images.Media.getContentUri(
             MediaStore.VOLUME_EXTERNAL_PRIMARY
         )
-        val existingUri = findExistingTestUri(collection, fileName)
-        val uri = (existingUri ?: context.contentResolver.insert(collection, values))
+        val uri = context.contentResolver.insert(collection, values)
             ?: throw IOException("MediaStore insert 失败")
 
-        context.contentResolver.openOutputStream(uri)?.use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-        } ?: throw IOException("打开输出流失败")
+        try {
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+            } ?: throw IOException("打开输出流失败")
+        } catch (e: Exception) {
+            // 写入失败：删除孤儿记录，避免 IS_PENDING=1 的空条目遗留在相册
+            runCatching { context.contentResolver.delete(uri, null, null) }
+                .onFailure { Log.w(TAG, "孤儿记录清理失败（试拍）: ${it.message}") }
+            throw e
+        }
         // bitmap 由 CaptureService 统一 recycle
 
         values.clear()
@@ -181,18 +197,6 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
 
     // ──────────── 辅助方法 ────────────
 
-    private fun findExistingTestUri(collection: Uri, fileName: String): Uri? {
-        val projection = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DISPLAY_NAME)
-        val selection = "${MediaStore.Images.Media.DISPLAY_NAME} = ?"
-        context.contentResolver.query(collection, projection, selection, arrayOf(fileName), null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val id = cursor.getLong(0)
-                return ContentUris.withAppendedId(collection, id)
-            }
-        }
-        return null
-    }
-
     /**
      * 从 MediaStore Uri 查询本地文件路径。
      * DATA 列在 Android 10+ 标记为废弃，但对自己创建的文件仍有效。
@@ -225,9 +229,21 @@ class DcimPhotoStorage(private val context: Context) : IPhotoStorage {
     override fun getPhotosPaged(offset: Int, limit: Int): List<File> =
         allPhotosSortedDesc().drop(offset).take(limit)
 
+    /**
+     * 排序结果缓存：全目录 walk + sort 每次是 O(N log N)，
+     * 相册页每次分页都调用会随照片数量线性劣化（数万张时明显卡顿）。
+     * 缓存一份排序结果，写入/删除后失效。
+     */
+    @Volatile private var sortedCache: List<File>? = null
+
+    override fun invalidateListCache() {
+        sortedCache = null
+    }
+
     private fun allPhotosSortedDesc(): List<File> =
-        baseDir.walkTopDown()
+        sortedCache ?: baseDir.walkTopDown()
             .filter { it.isFile && it.extension.equals("jpg", ignoreCase = true) }
             .sortedByDescending { it.name }
             .toList()
+            .also { sortedCache = it }
 }

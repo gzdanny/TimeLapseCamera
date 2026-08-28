@@ -26,7 +26,7 @@ interface IPhotoStorage {
     suspend fun save(bitmap: Bitmap, timestamp: Long): String
 
     /**
-     * 保存试拍照片（文件名带日期时间戳，格式 yyyy-MM-dd_HHmmss_SSS.jpg，每次不覆盖）。
+     * 保存试拍照片（文件名带毫秒时间戳，格式 yyyyMMdd_HHmmss_SSS.jpg，每次不覆盖）。
      * @param bitmap 带水印的试拍照片
      * @return 保存后的文件路径
      */
@@ -51,6 +51,13 @@ interface IPhotoStorage {
      * @return 本页照片列表（可能少于 limit，表示已到最后）
      */
     fun getPhotosPaged(offset: Int, limit: Int): List<File>
+
+    /**
+     * 使照片列表缓存失效。写操作（save/saveTestPhoto）后由实现自行调用；
+     * FIFO 清理删除文件后由 cleanupOldPhotos 默认实现调用。
+     * 默认空实现：不使用缓存的存储类无需关心。
+     */
+    fun invalidateListCache() {}
 
     /**
      * FIFO 清理旧照片：剩余空间低于阈值时，按时间从旧到新删除，直到达到安全线。
@@ -120,6 +127,8 @@ interface IPhotoStorage {
             if (BatteryMonitor.getStorageRemainingGb(photoDir) < safeLineGb && deleted >= maxDeleteCount) {
                 LogBuffer.log("W", "Storage", "本轮清理未完成，下轮继续")
             }
+            // 删除了文件，通知实现失效列表缓存（相册页可能正在分页浏览）
+            invalidateListCache()
         }
         if (deleted == 0 && remaining < thresholdGb) {
             LogBuffer.log("W", "Storage", "存储不足但无可删文件")

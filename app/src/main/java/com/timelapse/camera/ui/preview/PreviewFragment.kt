@@ -19,6 +19,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import coil.load
 import com.timelapse.camera.R
+import com.timelapse.camera.camera.CameraMutex
 import com.timelapse.camera.camera.CameraXController
 import com.timelapse.camera.config.CaptureConfig
 import com.timelapse.camera.databinding.FragmentPreviewBinding
@@ -110,8 +111,12 @@ class PreviewFragment : Fragment() {
 
     override fun onDestroyView() {
         super.onDestroyView()
-        cameraProvider?.unbindAll()
-        cameraProvider = null
+        // 异步持锁解绑：onDestroyView 时 viewLifecycleOwner 作用域已死，用 fragment 作用域兜底。
+        // 若拍摄服务正在拍照（持锁），此解绑会排队等待，不会打断拍摄
+        lifecycleScope.launch {
+            CameraMutex.withLock { cameraProvider?.unbindAll() }
+            cameraProvider = null
+        }
         _binding = null
     }
 
@@ -131,31 +136,36 @@ class PreviewFragment : Fragment() {
     private fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(requireContext())
         cameraProviderFuture.addListener({
-            val provider = cameraProviderFuture.get()
-            cameraProvider = provider
+            viewLifecycleOwner.lifecycleScope.launch {
+                val provider = cameraProviderFuture.get()
+                cameraProvider = provider
 
-            val preview = Preview.Builder()
-                .build()
-                .also {
-                    it.setSurfaceProvider(binding.previewView.surfaceProvider)
-                }
-
-            val cameraSelector = CameraSelector.Builder()
-                .addCameraFilter { cameraInfos ->
-                    cameraInfos.filter { info ->
-                        val camera2Info = Camera2CameraInfo.from(info)
-                        camera2Info.cameraId == config.cameraId
+                val preview = Preview.Builder()
+                    .build()
+                    .also {
+                        it.setSurfaceProvider(binding.previewView.surfaceProvider)
                     }
-                }
-                .build()
 
-            try {
-                provider.unbindAll()
-                provider.bindToLifecycle(
-                    viewLifecycleOwner, cameraSelector, preview
-                )
-            } catch (e: Exception) {
-                Toast.makeText(requireContext(), "启动预览失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                val cameraSelector = CameraSelector.Builder()
+                    .addCameraFilter { cameraInfos ->
+                        cameraInfos.filter { info ->
+                            val camera2Info = Camera2CameraInfo.from(info)
+                            camera2Info.cameraId == config.cameraId
+                        }
+                    }
+                    .build()
+
+                // 持有相机互斥锁：拍摄服务可能正在拍照（unbindAll 会解绑对方用例）
+                try {
+                    CameraMutex.withLock {
+                        provider.unbindAll()
+                        provider.bindToLifecycle(
+                            viewLifecycleOwner, cameraSelector, preview
+                        )
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(requireContext(), "启动预览失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             }
         }, ContextCompat.getMainExecutor(requireContext()))
     }
@@ -178,9 +188,9 @@ class PreviewFragment : Fragment() {
 
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                // ── 1. 释放预览（主线程）──
+                // ── 1. 释放预览（主线程，持锁防止打断拍摄服务）──
                 LogBuffer.log("I", "TestPhoto", "试拍开始，释放预览")
-                cameraProvider?.unbindAll()
+                CameraMutex.withLock { cameraProvider?.unbindAll() }
 
                 val timestamp = System.currentTimeMillis()
 

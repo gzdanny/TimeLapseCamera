@@ -11,6 +11,10 @@
     <string name="channel_name">拍摄服务</string>
     <string name="channel_desc">拍摄期间显示通知，确保服务不被系统杀死</string>
 
+    <!-- 拍摄前台服务通知 -->
+    <string name="notif_capture_title">延时相机拍摄中</string>
+    <string name="notif_capture_countdown">下次拍摄倒计时</string>
+
     <!-- 状态页 -->
     <string name="status_running">● 运行中</string>
     <string name="status_stopped">○ 未运行</string>
@@ -84,7 +88,7 @@
     <string name="settings_remote_desc">返回 15-3600 整数，作为下次拍摄间隔（秒）</string>
 
     <!-- 关于 -->
-    <string name="settings_version">版本 0.9.8</string>
+    <string name="settings_version">版本 %1$s</string>
 
     <!-- 摄像头方向（SettingsFragment Spinner 使用） -->
     <string name="settings_shot_rotation">拍摄方向</string>

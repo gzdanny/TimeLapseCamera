@@ -17,11 +17,14 @@ import java.util.Locale
  * - 每条日志同时写入内存缓冲和文件（append 模式）
  * - 崩溃后重启，init() 从文件加载历史日志到内存
  * - 内存缓冲最多保留 500 条，文件超过 ~100KB 自动截断（保留最近条目）
+ *
+ * 线程安全：
+ * - 内存缓冲和文件追加共用 logs 锁，多协程并发写不会交错
+ * - SimpleDateFormat 非线程安全，log() 中每次局部创建实例使用
  */
 object LogBuffer {
 
     private const val MAX_SIZE = 500
-    private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
     private val logs = mutableListOf<String>()
     private var logFile: File? = null
@@ -30,32 +33,37 @@ object LogBuffer {
     /**
      * 初始化日志文件路径，并从文件加载历史日志。
      * 应在 CaptureService.onCreate 和 StatusFragment.onCreate 中调用。
-     * 重复调用安全（仅第一次生效）。
+     *
+     * 支持目录变更：存储位置切换后传入新目录，会切换到新日志文件
+     * （旧文件保留，内存缓冲改为加载新目录下的历史日志）。
      *
      * @param logFileDir 日志文件所在目录（通常传入 storage.getPhotoDir()，与照片同目录）
      */
     fun init(logFileDir: File) {
-        if (initialized) return
         synchronized(logs) {
-            if (initialized) return
-            logFile = File(logFileDir, "timelapse_log.txt")
-            if (logFile!!.exists()) {
+            val newFile = File(logFileDir, "timelapse_log.txt")
+            if (initialized && newFile.absolutePath == logFile?.absolutePath) return
+
+            // 首次初始化，或目录变更：加载新目录下的历史日志
+            logs.clear()
+            if (newFile.exists()) {
                 runCatching {
-                    logFile!!.readLines().takeLast(MAX_SIZE).forEach { logs.add(it) }
+                    newFile.readLines().takeLast(MAX_SIZE).forEach { logs.add(it) }
                 }
             }
+            logFile = newFile
             initialized = true
         }
     }
 
     fun log(level: String, tag: String, message: String) {
-        val time = timeFormat.format(Date())
-        val line = "[$time] $level/$tag: $message"
+        val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+        val line = "[${timeFormat.format(Date())}] $level/$tag: $message"
         synchronized(logs) {
             logs.add(line)
             while (logs.size > MAX_SIZE) logs.removeAt(0)
+            appendToFileLocked(line)
         }
-        appendToFile(line)
     }
 
     fun getFormattedLogs(): String = synchronized(logs) {
@@ -63,14 +71,19 @@ object LogBuffer {
     }
 
     fun clear() {
-        synchronized(logs) { logs.clear() }
-        logFile?.let { it.writeText("") }
+        synchronized(logs) {
+            logs.clear()
+            logFile?.let { runCatching { it.writeText("") } }
+        }
     }
 
-    private fun appendToFile(line: String) {
+    /** 追加一行到日志文件。调用方必须已持有 logs 锁（文件写入与内存缓冲保持一致顺序）。 */
+    private fun appendToFileLocked(line: String) {
         val file = logFile ?: return
         runCatching {
             FileOutputStream(file, true).use { it.write((line + "\n").toByteArray()) }
+            // 200 = 每行平均字节数的估计值（时间戳+级别+标签+消息 ≈ 100-300 字节），
+            // 故截断阈值 ≈ 500 行 × 200B = 100KB
             if (file.length() > MAX_SIZE * 200L) {
                 file.readLines().takeLast(MAX_SIZE).let { lines ->
                     file.writeText(lines.joinToString("\n", postfix = "\n"))

@@ -36,7 +36,9 @@ class LocalPhotoStorage(
 ) : IPhotoStorage {
 
     private val baseDir = (customBaseDir ?: File(
-        context.getExternalFilesDir(Environment.DIRECTORY_PICTURES),
+        // getExternalFilesDir 理论上可返回 null（存储卷被移除），兜底到内部 filesDir
+        context.getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+            ?: context.filesDir,
         "TimeLapse"
     )).also { if (!it.exists()) it.mkdirs() }
 
@@ -53,18 +55,20 @@ class LocalPhotoStorage(
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
         }
         // 不在 save() 内 recycle，由调用方（CaptureService）统一管理 Bitmap 生命周期
-
+        invalidateListCache()
         file.absolutePath
     }
 
     override suspend fun saveTestPhoto(bitmap: Bitmap): String = withContext(Dispatchers.IO) {
-        val fileName = SimpleDateFormat("yyyy-MM-dd_HHmmss_SSS", Locale.getDefault())
+        // 文件名格式与正式照片对齐（yyyyMMdd_HHmmss_SSS），保证相册字典序 = 时间序
+        val fileName = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.getDefault())
             .format(Date(System.currentTimeMillis())) + ".jpg"
         val file = File(baseDir, fileName)
         FileOutputStream(file).use { out ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
         }
         // 不在 save() 内 recycle，由调用方（CaptureService）统一管理 Bitmap 生命周期
+        invalidateListCache()
         file.absolutePath
     }
 
@@ -82,9 +86,21 @@ class LocalPhotoStorage(
     override fun getPhotosPaged(offset: Int, limit: Int): List<File> =
         allPhotosSortedDesc().drop(offset).take(limit)
 
+    /**
+     * 排序结果缓存：全目录 walk + sort 每次是 O(N log N)，
+     * 相册页每次分页都调用会随照片数量线性劣化（数万张时明显卡顿）。
+     * 缓存一份排序结果，写入/删除后失效。
+     */
+    @Volatile private var sortedCache: List<File>? = null
+
+    override fun invalidateListCache() {
+        sortedCache = null
+    }
+
     private fun allPhotosSortedDesc(): List<File> =
-        baseDir.walkTopDown()
+        sortedCache ?: baseDir.walkTopDown()
             .filter { it.isFile && it.extension.equals("jpg", ignoreCase = true) }
             .sortedByDescending { it.name }
             .toList()
+            .also { sortedCache = it }
 }

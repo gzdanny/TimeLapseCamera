@@ -20,14 +20,6 @@ enum class StorageLocation {
     companion object {
         fun fromName(name: String?): StorageLocation =
             name?.let { runCatching { valueOf(it) }.getOrNull() } ?: APP_PRIVATE
-        /**
-         * 将 "WxH" 格式字符串解析为 Size，解析失败返回 null。
-         */
-        fun parseResolution(str: String?): Size? = str?.let { parts ->
-            parts.split("x").takeIf { it.size == 2 }?.let { (w, h) ->
-                runCatching { Size(w.toInt(), h.toInt()) }.getOrNull()
-            }
-        }
     }
 }
 
@@ -40,7 +32,7 @@ enum class StorageLocation {
  */
 data class CaptureConfig(
     /** 拍摄间隔（秒），远程配置可动态覆盖此值 */
-    val intervalSeconds: Int = 3600,
+    val intervalSeconds: Int = 30,
     /** 选中的摄像头 ID，精确到具体镜头（"0", "1", "2"…），而非粗粒度的前/后 */
     val cameraId: String = "0",
     /** 自定义水印文字，null 表示仅显示时间戳 */
@@ -150,6 +142,30 @@ data class CaptureConfig(
             parts.split("x").takeIf { it.size == 2 }?.let { (w, h) ->
                 runCatching { Size(w.toInt(), h.toInt()) }.getOrNull()
             }
+        }
+
+        /**
+         * 局部更新拍摄进度（captureCount + lastCaptureTime）。
+         *
+         * 为什么不用 save() 全量保存？
+         * - captureLoop 拍摄耗时数秒，期间用户可能在设置页修改配置
+         * - 全量 save 会用拍摄开始时读到的旧配置覆盖用户刚保存的新值（丢失更新竞态）
+         * - 局部更新只写自己的 key，与设置页的写入互不干扰
+         */
+        fun updateCaptureProgress(context: Context, captureCount: Int, lastCaptureTime: Long) {
+            prefs(context).edit()
+                .putInt(KEY_CAPTURE_COUNT, captureCount)
+                .putLong(KEY_LAST_CAPTURE_TIME, lastCaptureTime)
+                .apply()
+        }
+
+        /**
+         * 局部更新远程配置下发的间隔值（避免全量 save 的丢失更新竞态）。
+         */
+        fun updateRemoteInterval(context: Context, remoteInterval: Int) {
+            prefs(context).edit()
+                .putInt(KEY_LAST_REMOTE_INTERVAL, remoteInterval)
+                .apply()
         }
     }
 }

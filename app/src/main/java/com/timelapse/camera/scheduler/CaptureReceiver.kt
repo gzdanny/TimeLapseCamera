@@ -30,10 +30,18 @@ class CaptureReceiver : BroadcastReceiver() {
         val serviceIntent = Intent(context, CaptureService::class.java).apply {
             action = CaptureService.ACTION_START
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(serviceIntent)
-        } else {
-            context.startService(serviceIntent)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+        } catch (e: Exception) {
+            // Android 12+ 后台 FGS 启动限制：setExactAndAllowWhileIdle 触发的广播
+            // 不在豁免列表内，App 处于后台时 startForegroundService 会抛
+            // ForegroundServiceStartNotAllowedException。兜底：5 秒后再试一次
+            LogBuffer.log("E", TAG, "启动前台服务失败: ${e.javaClass.simpleName}: ${e.message}，5秒后重试")
+            CaptureScheduler.get(context).scheduleNext(5)
         }
     }
 }

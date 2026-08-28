@@ -44,6 +44,9 @@ class GalleryFragment : Fragment() {
     private var loadedCount = 0
     private val PAGE_SIZE = 30
 
+    /** 加载门闩：防止快速滚动时多个 loadNextPage 协程并发读同一 offset 导致重复追加 */
+    @Volatile private var isLoading = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         storage = PhotoStorageFactory.create(requireContext(), CaptureConfig.load(requireContext()))
@@ -95,19 +98,27 @@ class GalleryFragment : Fragment() {
     /**
      * 加载下一页：从 loadedCount 开始取 PAGE_SIZE 张照片追加到 adapter。
      * 如果返回数量 < PAGE_SIZE 说明已到末尾。
+     * isLoading 门闩保证同一时刻只有一个加载协程在跑。
      */
     private fun loadNextPage() {
+        if (isLoading) return
+        isLoading = true
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-            val photos = storage.getPhotosPaged(loadedCount, PAGE_SIZE)
-            withContext(Dispatchers.Main) {
-                if (photos.isEmpty()) {
-                    // 无更多照片，显示空状态提示
-                    if (adapter.itemCount == 0) binding.tvEmpty.visibility = View.VISIBLE
-                } else {
-                    adapter.addPhotos(photos)
-                    loadedCount += photos.size
-                    binding.tvEmpty.visibility = View.GONE
+            try {
+                val photos = storage.getPhotosPaged(loadedCount, PAGE_SIZE)
+                withContext(Dispatchers.Main) {
+                    val b = _binding ?: return@withContext
+                    if (photos.isEmpty()) {
+                        // 无更多照片，显示空状态提示
+                        if (adapter.itemCount == 0) b.tvEmpty.visibility = View.VISIBLE
+                    } else {
+                        adapter.addPhotos(photos)
+                        loadedCount += photos.size
+                        b.tvEmpty.visibility = View.GONE
+                    }
                 }
+            } finally {
+                isLoading = false
             }
         }
     }

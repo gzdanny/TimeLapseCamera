@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import com.timelapse.camera.R
 import com.timelapse.camera.config.CaptureConfig
 import com.timelapse.camera.scheduler.CaptureScheduler
+import com.timelapse.camera.storage.PhotoStorageFactory
 import com.timelapse.camera.util.LogBuffer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,10 +31,9 @@ import kotlinx.coroutines.launch
  * - 运行在 :watchdog 进程，与主服务完全隔离
  * - 每 60s 检查一次主服务进程是否存活
  * - 不存活时立即重新注册拍摄闹钟以触发服务重启
- * - 持有 WakeLock 防止息屏时守护进程本身被杀
- *
- * 这是一个简单但有效的进程级保活方案：
- * 即使系统杀掉了主服务进程，只要 Watchdog 进程存活，就能自动恢复。
+ * - 持有 WakeLock 防止息屏时守护进程本身被杀（实测国产 OS 深度睡眠后
+ *   CPU 无法可靠唤醒，故无超时持有，与主服务策略一致）
+ * - 用户停止拍摄（isRunning=false）连续 2 次检查后自行退出，避免常驻耗电
  */
 class WatchdogService : Service() {
 
@@ -42,6 +42,7 @@ class WatchdogService : Service() {
         private const val CHANNEL_ID = "timelapse_watchdog"
         private const val NOTIFICATION_ID = 99
         private const val CHECK_INTERVAL_MS = 60_000L // 每 60s 检查一次
+        private const val IDLE_EXIT_ROUNDS = 2 // isRunning=false 连续 N 次后自行退出
     }
 
     // 使用 CoroutineScope 替代 MainScope，避免引入 lifecycle-runtime-ktx 依赖
@@ -51,6 +52,11 @@ class WatchdogService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // 独立进程：LogBuffer 需在本进程内重新初始化，否则守护日志全部静默丢失
+        runCatching {
+            val config = CaptureConfig.load(applicationContext)
+            LogBuffer.init(PhotoStorageFactory.create(applicationContext, config).getPhotoDir())
+        }
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
         acquireWakeLock()
@@ -69,19 +75,29 @@ class WatchdogService : Service() {
      */
     private fun startCheckLoop() {
         checkJob = serviceScope.launch(Dispatchers.Default) {
+            var idleRounds = 0 // isRunning=false 的连续轮数
             while (isActive) {
                 delay(CHECK_INTERVAL_MS)
                 if (!isMainServiceRunning()) {
                     // 只有用户在设置中开启了拍摄（isRunning=true），才需要重启
                     val config = CaptureConfig.load(this@WatchdogService)
                     if (config.isRunning) {
+                        idleRounds = 0
                         LogBuffer.log("W", TAG, "主服务进程未运行，Watchdog 触发重启闹钟")
                         // 设一个 5 秒后的闹钟，触发 CaptureReceiver → 重启主服务
                         CaptureScheduler.get(this@WatchdogService).scheduleNext(5)
                     } else {
-                        LogBuffer.log("I", TAG, "主服务未运行，isRunning=false，不重启")
+                        // 用户已停止拍摄：连续 N 轮仍为 false 则自行退出，避免常驻耗电
+                        idleRounds++
+                        LogBuffer.log("I", TAG, "主服务未运行，isRunning=false（$idleRounds/$IDLE_EXIT_ROUNDS）")
+                        if (idleRounds >= IDLE_EXIT_ROUNDS) {
+                            LogBuffer.log("I", TAG, "连续 $IDLE_EXIT_ROUNDS 轮无拍摄任务，守护服务自行退出")
+                            stopSelf()
+                            break
+                        }
                     }
                 } else {
+                    idleRounds = 0
                     LogBuffer.log("I", TAG, "主服务运行正常")
                 }
             }
@@ -119,11 +135,12 @@ class WatchdogService : Service() {
     }
 
     private fun acquireWakeLock() {
+        releaseWakeLock() // 先释放旧实例，防泄漏
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,
             "${applicationContext.packageName}:watchdog"
-        ).apply { acquire(10 * 60 * 1000L /* 10分钟 */) }
+        ).apply { acquire() } // 无超时：国产 OS 深度睡眠后 CPU 无法可靠唤醒，与主服务策略一致
     }
 
     private fun releaseWakeLock() {
