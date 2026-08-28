@@ -143,8 +143,8 @@ class StatusFragment : Fragment() {
                 b.tvStatus.text = if (isRunning) getString(R.string.status_running)
                 else getString(R.string.status_stopped)
                 b.tvStatus.setTextColor(
-                    if (isRunning) resources.getColor(android.R.color.holo_green_dark)
-                    else resources.getColor(android.R.color.darker_gray)
+                    if (isRunning) ContextCompat.getColor(requireContext(), android.R.color.holo_green_dark)
+                    else ContextCompat.getColor(requireContext(), android.R.color.darker_gray)
                 )
                 b.btnToggle.text = if (isRunning) getString(R.string.btn_stop)
                 else getString(R.string.btn_start)
@@ -177,7 +177,6 @@ class StatusFragment : Fragment() {
 
     // ──────────── UI 更新（进入页面时加载一次）────────────
 
-    @Suppress("DEPRECATION")
     private fun updateUI() {
         val isRunning = config.isRunning
 
@@ -185,8 +184,8 @@ class StatusFragment : Fragment() {
         binding.tvStatus.text = if (isRunning) getString(R.string.status_running)
         else getString(R.string.status_stopped)
         binding.tvStatus.setTextColor(
-            if (isRunning) resources.getColor(android.R.color.holo_green_dark)
-            else resources.getColor(android.R.color.darker_gray)
+            if (isRunning) ContextCompat.getColor(requireContext(), android.R.color.holo_green_dark)
+            else ContextCompat.getColor(requireContext(), android.R.color.darker_gray)
         )
 
         // 按钮

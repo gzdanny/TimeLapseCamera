@@ -384,7 +384,7 @@ class SettingsFragment : Fragment() {
             startActivity(PermissionChecker.exactAlarmSettingsIntent(requireContext()))
         }
         binding.rowBatteryOptimization.setOnClickListener {
-            startActivity(PermissionChecker.batteryOptimizationIntent(requireContext()))
+            startActivity(PermissionChecker.batteryOptimizationIntent())
         }
         binding.rowAppDetails.setOnClickListener {
             startActivity(PermissionChecker.appDetailsIntent(requireContext()))

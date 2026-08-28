@@ -191,7 +191,6 @@ class CaptureService : Service() {
                 // ── 2. 拍摄 ──
                 // WakeLock 已由服务启动时持有（防止息屏秒睡），此处只需正常拍摄
                 val timestamp = System.currentTimeMillis()
-                var bitmapToSave: Bitmap? = null
                 try {
                     LogBuffer.log("I", TAG, "开始拍摄 #${config.captureCount + 1}")
                     val camera: ICameraController = CameraXController(
@@ -210,7 +209,8 @@ class CaptureService : Service() {
                             config.watermarkShowStorage ||
                             config.watermarkShowTemperature
 
-                    bitmapToSave = when (result) {
+                    // when 对 CaptureResult（密封类）穷尽匹配，两分支均产出非 null Bitmap
+                    val bitmapToSave: Bitmap = when (result) {
                         is CaptureResult.Success -> {
                             if (hasWatermark) {
                                 LogBuffer.log("I", TAG, "开始水印处理")
@@ -229,26 +229,27 @@ class CaptureService : Service() {
 
                     // 写入磁盘也可能失败（磁盘满、IO 错误等）
                     // 失败了就打 Log，不崩溃，等下一轮继续（释放资源是关键）
-                    runCatching {
-                        val bmp = bitmapToSave ?: throw RuntimeException("bitmapToSave 应为非 null")
-                        storage.save(bmp, timestamp)
-                    }.onSuccess {
-                        if (result is CaptureResult.Success) {
-                            // 局部更新：只写拍摄进度的 key，避免全量 save 覆盖用户刚改的其他配置。
-                            // lastCaptureTime 在拍摄成功后才更新（UI 据此推算倒计时，拍完起算更准确）
-                            val newCount = config.captureCount + 1
-                            CaptureConfig.updateCaptureProgress(applicationContext, newCount, timestamp)
-                            config = config.copy(captureCount = newCount, lastCaptureTime = timestamp)
-                            LogBuffer.log("I", TAG, "拍摄完成 #$newCount")
-                        } else {
-                            LogBuffer.log("W", TAG, "拍摄失败，已保存黑图占位")
+                    // Bitmap 生命周期闭环：无论存盘成功与否，统一回收，杜绝泄漏
+                    try {
+                        runCatching {
+                            storage.save(bitmapToSave, timestamp)
+                        }.onSuccess {
+                            if (result is CaptureResult.Success) {
+                                // 局部更新：只写拍摄进度的 key，避免全量 save 覆盖用户刚改的其他配置。
+                                // lastCaptureTime 在拍摄成功后才更新（UI 据此推算倒计时，拍完起算更准确）
+                                val newCount = config.captureCount + 1
+                                CaptureConfig.updateCaptureProgress(applicationContext, newCount, timestamp)
+                                config = config.copy(captureCount = newCount, lastCaptureTime = timestamp)
+                                LogBuffer.log("I", TAG, "拍摄完成 #$newCount")
+                            } else {
+                                LogBuffer.log("W", TAG, "拍摄失败，已保存黑图占位")
+                            }
+                        }.onFailure { e ->
+                            LogBuffer.log("E", TAG, "写入磁盘失败: ${e.message}")
                         }
-                    }.onFailure { e ->
-                        LogBuffer.log("E", TAG, "写入磁盘失败: ${e.message}")
+                    } finally {
+                        bitmapToSave.recycle()
                     }
-                } finally {
-                    // Bitmap 生命周期闭环：无论成功/失败/异常，统一回收，杜绝双重回收或泄漏
-                    bitmapToSave?.recycle()
                 }
 
                 // ── 3. 更新倒计时通知（系统自动渲染，零功耗）──

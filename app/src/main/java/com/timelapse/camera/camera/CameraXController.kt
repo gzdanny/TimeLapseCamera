@@ -150,15 +150,25 @@ class CameraXController(
 
                 // 5. 冷启动对焦：触发 AF/AE/AWB 并等待 300ms 让传感器稳定
                 //    低端机不加此步骤容易出现黑屏/模糊，官方文档推荐先对焦再拍摄
-                //    使用 SurfaceOrientedMeteringPointFactory + WindowManager，息屏时安全兜底
+                //    使用 SurfaceOrientedMeteringPointFactory，息屏时安全兜底
                 try {
-                    // DisplayMetrics 仅作为尺寸容器使用，不参与 deprecated 的 Display API
-                    val metrics = DisplayMetrics()
-                    (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
-                        ?.defaultDisplay?.getRealMetrics(metrics)
+                    // 获取屏幕尺寸：API 30+ 用 WindowManager.getCurrentWindowMetrics（官方替代），
+                    // API 26-29 保留 Display.getRealMetrics 旧路径（已废弃但无替代）
+                    val (widthPx, heightPx) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+                        val bounds = wm.currentWindowMetrics.bounds
+                        bounds.width() to bounds.height()
+                    } else {
+                        @Suppress("DEPRECATION")
+                        val metrics = DisplayMetrics()
+                        @Suppress("DEPRECATION")
+                        (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
+                            ?.defaultDisplay?.getRealMetrics(metrics)
+                        metrics.widthPixels to metrics.heightPixels
+                    }
                     val pointFactory = SurfaceOrientedMeteringPointFactory(
-                        metrics.widthPixels.toFloat().coerceAtLeast(1f),
-                        metrics.heightPixels.toFloat().coerceAtLeast(1f)
+                        widthPx.toFloat().coerceAtLeast(1f),
+                        heightPx.toFloat().coerceAtLeast(1f)
                     )
                     camera.cameraControl.startFocusAndMetering(
                         FocusMeteringAction.Builder(pointFactory.createPoint(0.5f, 0.5f)).build()
