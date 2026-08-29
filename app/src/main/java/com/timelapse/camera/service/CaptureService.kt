@@ -196,8 +196,7 @@ class CaptureService : Service() {
                 val camera: ICameraController = CameraXController(
                     applicationContext,
                     config.cameraId,
-                    config.shotRotation,
-                    CaptureConfig.parseResolution(config.resolution)
+                    config.shotRotation
                 )
                 val result = camera.capture()
                 LogBuffer.log("I", TAG, "拍摄结果: ${if (result is CaptureResult.Success) "成功" else "失败: ${(result as CaptureResult.Failure).message}"}")

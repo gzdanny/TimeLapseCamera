@@ -1,7 +1,6 @@
 package com.timelapse.camera.camera
 
 import android.content.Context
-import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.util.Size
@@ -20,7 +19,6 @@ import com.timelapse.camera.util.LogBuffer
  * - facing：后置/前置/外接
  * - sensorSize：传感器像素尺寸（宽x高）
  * - focalLengths：焦距数组（mm），区分主摄/超广角/长焦
- * - jpegSizes：支持的 JPEG 拍照分辨率列表（按面积从大到小排序）
  *
  * 教学要点：
  * - CameraManager.getCameraIdList() 不需要相机权限
@@ -36,8 +34,7 @@ object CameraEnumerator {
         val facing: Int,
         val facingName: String,
         val sensorSize: Size?,
-        val focalLengths: FloatArray?,
-        val jpegSizes: List<Size>
+        val focalLengths: FloatArray?
     ) {
         val megapixels: String
             get() = sensorSize?.let {
@@ -73,12 +70,8 @@ object CameraEnumerator {
 
                 val sensorSize = chars.get(CameraCharacteristics.SENSOR_INFO_PIXEL_ARRAY_SIZE)
                 val focalLengths = chars.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
-                val jpegSizes = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                    ?.getOutputSizes(ImageFormat.JPEG)
-                    ?.sortedByDescending { it.width * it.height }
-                    ?: emptyList()
 
-                val info = CameraInfo(id, facing, facingName, sensorSize, focalLengths, jpegSizes)
+                val info = CameraInfo(id, facing, facingName, sensorSize, focalLengths)
                 result.add(info)
                 LogBuffer.log("I", TAG, "[$id] $facingName | ${info.megapixels} | 传感器: ${sensorSize?.let { "${it.width}x${it.height}" } ?: "未知"} | 焦距: ${info.focalLengthText}")
             }.onFailure { e ->

@@ -55,9 +55,7 @@ class CameraXController(
      * 直接传给 setTargetRotation，与 CameraX 值域一致，无转换。
      * 注意：不是角度值（90° 是 ROTATION_90 = 1，而非 90）。
      */
-    private val shotRotation: Int,
-    /** 用户选择的拍摄分辨率，null 表示用摄像头最高分辨率 */
-    private val resolution: Size?
+    private val shotRotation: Int
 ) : ICameraController {
 
     companion object {
@@ -111,11 +109,9 @@ class CameraXController(
                 lifecycleOwner = owner
 
                 // 1. 获取该镜头物理传感器的最高 JPEG 输出尺寸（通过底层 Camera2 API）
-                val rawMaxSize = getMaxJpegSize(id)
-                // 用户使用指定分辨率时优先，否则用最高分辨率
-                val targetSize = resolution ?: rawMaxSize
+                val targetSize = getMaxJpegSize(id)
 
-                // 2. 直接用 targetSize，不手动对调长宽：CameraX 的 setTargetRotation 会内部处理旋转映射
+                // 2. 直接使用最高分辨率，不手动对调长宽：CameraX 的 setTargetRotation 会内部处理旋转映射
                 //    之前曾尝试手动对调，结果触发了 "No available output size" 错误
                 //    正确做法：传 rawSize + setTargetRotation(rotation)，CameraX 自行计算
                 val resolutionSelector = ResolutionSelector.Builder()

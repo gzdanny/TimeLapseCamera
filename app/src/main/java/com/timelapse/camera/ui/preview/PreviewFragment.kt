@@ -3,7 +3,6 @@ package com.timelapse.camera.ui.preview
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.util.Size
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -198,8 +197,7 @@ class PreviewFragment : Fragment() {
                 val camera = CameraXController(
                     requireContext(),
                     config.cameraId,
-                    config.shotRotation,
-                    CaptureConfig.parseResolution(config.resolution)
+                    config.shotRotation
                 )
                 val result = camera.capture()
                 LogBuffer.log("I", "TestPhoto",

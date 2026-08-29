@@ -2,7 +2,6 @@ package com.timelapse.camera.config
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.util.Size
 import android.view.Surface
 
 /**
@@ -62,8 +61,6 @@ data class CaptureConfig(
      * 度数只存在于设置页的显示文案（人类阅读），代码中不出现。
      */
     val shotRotation: Int = Surface.ROTATION_90,
-    /** 拍摄分辨率（"WxH" 格式），null 表示用摄像头最高分辨率 */
-    val resolution: String? = null,
     /** FIFO 清理阈值（GB）：剩余空间低于此值时触发清理 */
     val storageThresholdGb: Float = 1.0f,
     /** FIFO 清理安全线（GB）：清理到此值停止 */
@@ -84,7 +81,6 @@ data class CaptureConfig(
             putLong(KEY_LAST_CAPTURE_TIME, lastCaptureTime)
             putString(KEY_STORAGE_LOCATION, storageLocation.name)
             putInt(KEY_SHOT_ROTATION, shotRotation)
-            putString(KEY_RESOLUTION, resolution)
             putFloat(KEY_STORAGE_THRESHOLD, storageThresholdGb)
             putFloat(KEY_STORAGE_SAFE_LINE, storageSafeLineGb)
             apply()
@@ -106,7 +102,6 @@ data class CaptureConfig(
         private const val KEY_LAST_CAPTURE_TIME = "last_capture_time"
         private const val KEY_STORAGE_LOCATION = "storage_location"
         private const val KEY_SHOT_ROTATION = "shot_rotation"
-        private const val KEY_RESOLUTION = "resolution"
         private const val KEY_STORAGE_THRESHOLD = "storage_threshold_gb"
         private const val KEY_STORAGE_SAFE_LINE = "storage_safe_line_gb"
 
@@ -138,15 +133,6 @@ data class CaptureConfig(
                 storageThresholdGb = prefs.getFloat(KEY_STORAGE_THRESHOLD, 1.0f),
                 storageSafeLineGb = prefs.getFloat(KEY_STORAGE_SAFE_LINE, 2.0f)
             )
-        }
-
-        /**
-         * 将 "WxH" 格式字符串解析为 Size，解析失败返回 null。
-         */
-        fun parseResolution(str: String?): Size? = str?.let { parts ->
-            parts.split("x").takeIf { it.size == 2 }?.let { (w, h) ->
-                runCatching { Size(w.toInt(), h.toInt()) }.getOrNull()
-            }
         }
 
         /**
