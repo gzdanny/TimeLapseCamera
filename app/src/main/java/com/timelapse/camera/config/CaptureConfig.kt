@@ -129,7 +129,6 @@ data class CaptureConfig(
                 lastCaptureTime = prefs.getLong(KEY_LAST_CAPTURE_TIME, 0),
                 storageLocation = StorageLocation.fromName(prefs.getString(KEY_STORAGE_LOCATION, null)),
                 shotRotation = prefs.getInt(KEY_SHOT_ROTATION, Surface.ROTATION_90),
-                resolution = prefs.getString(KEY_RESOLUTION, null),
                 storageThresholdGb = prefs.getFloat(KEY_STORAGE_THRESHOLD, 1.0f),
                 storageSafeLineGb = prefs.getFloat(KEY_STORAGE_SAFE_LINE, 2.0f)
             )
